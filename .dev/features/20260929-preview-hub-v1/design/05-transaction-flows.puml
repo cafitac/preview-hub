@@ -1,0 +1,94 @@
+@startuml
+title preview-hub v1 — Create environment (phub up)
+
+actor "User / PR bot" as Caller
+participant "CLI (inside phub-hub container)" as CLI
+participant "CreateEnvironment" as UC
+participant "EnvLock\n(/state/locks/<env>.lock on volume phub-state)" as Lock
+database "Registry (SQLite)" as DB
+participant "GitSource" as Git
+participant "PlanBuilder" as Plan
+participant "Runner (ComposeRunner)" as Run
+participant "Docker (Colima preview-hub)" as Docker
+
+Caller -> CLI: up --name feat-x --set backend=feat-x [--ttl 24h]
+CLI -> UC: execute(spec)
+UC -> Lock: acquire exclusive (non-blocking; busy -> "operation in progress")
+group SQLite txn 1 (BEGIN IMMEDIATE)
+  UC -> DB: find active env by name
+  alt exists and same requested refs and READY
+    UC --> CLI: current status (idempotent no-op)
+  else exists and different refs
+    UC --> CLI: reject: use `phub update` (explicit)
+  else not exists
+    UC -> DB: insert environments(state=REQUESTED, spec after catalog defaults)\ninsert operations(CREATE, RUNNING, pid, heartbeat)
+  end
+end
+UC -> Git: resolve(repo, ref) for every service (ls-remote)
+group SQLite txn 2
+  UC -> DB: state=RESOLVING -> BUILDING; insert environment_services(commit_sha, image)
+end
+UC -> Git: checkout(repo, sha) into /src/<service>/<sha> on volume phub-src (shared, read-only)
+UC -> Plan: build(env, manifests, catalog) -> EnvironmentPlan\n(requires order, injected env, routes, labels, resources)
+UC -> Run: build images missing for (service, sha) — skip if image exists
+note right: build concurrency <= 2 (hub-wide semaphore);\nheartbeat updated between steps
+group SQLite txn 3
+  UC -> DB: state=STARTING
+end
+UC -> Run: apply(plan): compose up -d project phub-feat-x\n(network phub-feat-x, volumes phub-feat-x-*, labels dev.phub.env=feat-x)
+Run -> Docker: create/start db -> migrate/seed job -> services
+Run -> Docker: connect phub-proxy to network phub-feat-x (routes by labels)
+UC -> Run: health(env) until all HEALTHY or timeout
+alt all healthy
+  group SQLite txn 4
+    UC -> DB: state=READY, public_url/health per service; op SUCCEEDED
+  end
+else failure at any step after insert
+  group SQLite txn 4'
+    UC -> DB: state=FAILED, last_error(stage, service, log excerpt); op FAILED
+  end
+  note right: objects are left for inspection;\n`phub down` removes them by label
+end
+UC -> Lock: release
+UC --> CLI: status + URLs + pinned commits
+
+newpage preview-hub v1 — Delete environment (phub down) and TTL expiry
+
+actor "User / bot / expiry sweep" as Caller
+participant "DeleteEnvironment" as UC
+participant "EnvLock" as Lock
+database "Registry (SQLite)" as DB
+participant "Runner" as Run
+participant "Docker" as Docker
+
+Caller -> UC: execute(name)
+UC -> Lock: acquire exclusive
+group SQLite txn 1
+  UC -> DB: find env by name (any state)
+  alt none or DELETED
+    UC -> Run: inventory(label dev.phub.env=name)
+    note right: still sweep stray labelled objects
+  else active
+    UC -> DB: state=DELETING; insert operations(DELETE, RUNNING)
+  end
+end
+UC -> Run: destroy(env) = compose down -v for project\n+ remove any object with label dev.phub.env=name\n+ disconnect proxy from network
+Run -> Docker: remove containers, networks, volumes (label-scoped only)
+UC -> Run: inventory(label) must be empty
+alt empty
+  group SQLite txn 2
+    UC -> DB: state=DELETED, deleted_at; op SUCCEEDED
+  end
+else leftovers
+  group SQLite txn 2'
+    UC -> DB: state stays DELETING, op FAILED with leftover list
+  end
+end
+UC -> Lock: release
+
+note over Caller, Docker
+  ExpireEnvironments (every 15 min by the phub-hub container's own gc loop, or `phub gc`):
+  select READY|FAILED where ttl_expires_at < now -> DeleteEnvironment per env (skip if lock busy).
+  Stale RUNNING operation (pid gone, heartbeat older than 10 min) -> INTERRUPTED, env -> FAILED.
+end note
+@enduml

@@ -1,0 +1,37 @@
+@startuml
+title Environment lifecycle (owned by preview-hub)
+
+[*] --> REQUESTED : up (CreateEnvironment)
+REQUESTED --> RESOLVING : lock held
+RESOLVING --> BUILDING : all refs resolved to commits
+BUILDING --> STARTING : images exist for every (service, sha)
+STARTING --> READY : every service HEALTHY within timeout
+READY --> UPDATING : update --set svc=ref (UpdateEnvironment)
+UPDATING --> BUILDING : changed services re-resolved
+READY --> READY : up with identical refs (idempotent no-op)
+REQUESTED --> FAILED : resolve error
+RESOLVING --> FAILED : ref not found / manifest invalid
+BUILDING --> FAILED : build error
+STARTING --> FAILED : start / migrate / health timeout
+UPDATING --> FAILED : any update error
+FAILED --> UPDATING : update (retry with new refs)
+READY --> DELETING : down / TTL expired
+FAILED --> DELETING : down / TTL expired
+DELETING --> DELETED : label inventory empty
+DELETING --> DELETING : leftovers -> retry down
+DELETED --> [*]
+
+note right of FAILED
+  Objects stay for inspection.
+  Stale RUNNING op (pid gone, heartbeat > 10 min)
+  moves any in-flight state to FAILED.
+end note
+note right of DELETED
+  Terminal. Name becomes reusable.
+  down on DELETED / unknown name = no-op sweep by label.
+end note
+note left of READY
+  Forbidden: up with different refs on an active name
+  (must be explicit update); any transition without the env lock.
+end note
+@enduml

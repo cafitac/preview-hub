@@ -1,0 +1,15 @@
+# Acceptance trace
+
+PR units are provisional names; `feature-plan` fixes them from this design (U-BE example backend, U-FE example frontend, U-CORE hub contracts + registry + lifecycle with FakeRunner, U-RUN ComposeRunner + proxy + runtime E2E, U-N notifier (S2), U-BOT PR bot (S3), U-QA descriptor/report schemas (S4)).
+
+| Acceptance ID | Design flow / artifact | Persisted effect and invariant | Automated evidence | Runtime evidence | Rollback evidence | PR unit |
+|---|---|---|---|---|---|---|
+| A1 | 05 Create flow; 11 C3 resolution; 02 PinnedService | environment_services.commit_sha fixed at create; later branch moves do not change it | unit: resolution + pin immutability with fake GitSource | trading-macstudio: `up` backend=feat-x, push a new commit to feat-x, `status` still shows the old SHA | `down` | U-CORE, U-RUN |
+| A2 | 07 isolation; 11 C1 resources/env; 01 context | per-env network, DB container and volume; env-scoped URLs | unit: plan builder gives distinct names/URLs per env | two envs up at once; note written in env A absent in env B; each frontend calls its own backend | `down` both | U-RUN, U-BE, U-FE |
+| A3 | 05 Delete flow; 07 cleanup scope | DELETED only when label inventory is empty | unit: destroy is label-scoped (FakeRunner) | inventory of `dev.phub.env=a` empty after down; env B and non-phub objects unchanged (before/after listing) | n/a | U-RUN |
+| A4 | 06 idempotent transitions; 07 idempotency, expiry | partial unique name; version bump | unit: repeated up/down; expiry selects only expired READY/FAILED | `up` twice = one environment; env with ttl 2m removed by `phub gc` | n/a | U-CORE, U-RUN |
+| A5 | 06 FAILED; 05 failure branch; 07 result-unknown | last_error with stage/service/log; op FAILED/INTERRUPTED | unit: failure at each stage -> FAILED; stale op -> INTERRUPTED | branch with a broken health check -> FAILED with excerpt; `down` leaves empty inventory | `down` | U-CORE, U-RUN |
+| A6 | 11 C1 requires optional, C2 catalog include | catalog entry only | unit: plan with/without optional service | notifier repo + catalog entry, zero preview-hub diff; backend calls notifier in env | remove catalog entry | U-N |
+| A7 | 02 Runner interface; 11 C4 | lifecycle imports Runner only | unit: full lifecycle with FakeRunner; import-boundary test | n/a | n/a | U-CORE |
+| A8 | 11 C7, C8 | none | schema tests: descriptor from a READY env validates; sample report validates | `status --format descriptor` on a live env validates | n/a | U-QA |
+| A9 | 11 C6; 05 create via bot | operations.requested_by gh:<login>#<pr> | unit: grammar parser + authorization | live PR comment up/down on an example repo; non-collaborator rejected | `/preview down` | U-BOT |
