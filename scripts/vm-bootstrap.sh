@@ -42,6 +42,8 @@ else
         git checkout --detach FETCH_HEAD
     ' sh "$repo" "$ref"
 fi
+# Pre-pull the pinned HTTP probe before health checks use their 30-second timeout.
+"$docker" --context colima-preview-hub pull curlimages/curl:8.12.1
 # The official CLI image includes Buildx; the context and socket belong to this VM.
 "$docker" --context colima-preview-hub run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$context/repo:/work:ro" docker:27-cli buildx build --load -t phub/hub:local /work
 colima ssh --profile preview-hub -- sudo mkdir -p /opt/phub

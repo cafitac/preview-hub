@@ -4,6 +4,7 @@ import argparse
 import fcntl
 import getpass
 import json
+import math
 import os
 import sys
 import time
@@ -96,9 +97,13 @@ def create_context() -> Context:
     runner_name = config_override(config, "PHUB_RUNNER", "runner", "fake")
     runner: Runner
     free_space = None
+    poll_interval = 0.1
     if runner_name == "compose":
         from .runners.compose import ComposeRunner, vm_free_bytes
 
+        poll_interval = float(os.environ.get("PHUB_HEALTH_POLL_INTERVAL", "2"))
+        if not math.isfinite(poll_interval) or poll_interval <= 0:
+            raise InvalidInput("Health poll interval must be finite and positive")
         runner = ComposeRunner(
             state_dir,
             config_override(
@@ -122,6 +127,7 @@ def create_context() -> Context:
         ),
         runner,
         free_space=free_space,
+        poll_interval=poll_interval,
     )
 
 

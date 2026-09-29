@@ -264,6 +264,12 @@ def test_http_health_probe_and_logs(tmp_path):
     probe = next(args for args in docker.calls if args[1] == "run")
     assert "phub-test-one" in probe and "dev.phub.env=test-one" in probe
     assert probe[-1] == "http://backend:8000/healthz"
+    image = "curlimages/curl:8.12.1"
+    assert image in probe
+    bootstrap = Path("scripts/vm-bootstrap.sh").read_text()
+    pull = f'"$docker" --context colima-preview-hub pull {image}'
+    assert pull in bootstrap
+    assert bootstrap.index(pull) < bootstrap.index("compose -p phub-hub")
 
     def stderr_logs(args, timeout):
         return subprocess.CompletedProcess(args, 0, "stdout", "stderr")
@@ -370,3 +376,23 @@ def test_cmd_healthcheck_respects_manifest_deadline(plan, timeout, retries):
     }
     # Even immediate failures cannot exhaust retries before the deadline.
     assert retries * 2 >= int(timeout[:-1])
+
+
+@pytest.mark.parametrize("failure", ["network", "proxy"])
+def test_environment_apply_failure_has_no_service(plan, tmp_path, failure):
+    docker = Docker()
+
+    def fail_environment(args, timeout):
+        result = docker(args, timeout)
+        if failure == "network" and args[1:3] == ["network", "ls"]:
+            return subprocess.CompletedProcess(args, 1, "", "network discovery failed")
+        return result
+
+    result = ComposeRunner(tmp_path, executor=fail_environment).apply(plan)
+    assert not result.success
+    assert result.service is None
+    assert (
+        "network discovery failed"
+        if failure == "network"
+        else "Expected one managed phub-proxy"
+    ) in result.log_excerpt

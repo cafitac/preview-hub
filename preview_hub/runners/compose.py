@@ -251,6 +251,7 @@ class ComposeRunner:
                             f"{service.name}--{resource.id}--init-{index}",
                         )
                 self._compose(plan.env, "up", "-d", "--no-deps", service.name)
+            current = None
             networks = self._ids("network", plan.env)
             proxies = self._ids("container", None, "dev.phub.service=proxy")
             if len(proxies) != 1:

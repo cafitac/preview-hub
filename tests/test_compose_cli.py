@@ -5,10 +5,14 @@ import pytest
 from preview_hub.cli import create_context, main
 
 
-def test_compose_config_wires_disk_provider(tmp_path, monkeypatch):
+@pytest.mark.parametrize("interval,expected", [(None, 2), ("0.5", 0.5)])
+def test_compose_config_wires_disk_provider(tmp_path, monkeypatch, interval, expected):
     from preview_hub.runners import compose
     from preview_hub.runners.fake import FakeRunner
 
+    monkeypatch.delenv("PHUB_HEALTH_POLL_INTERVAL", raising=False)
+    if interval is not None:
+        monkeypatch.setenv("PHUB_HEALTH_POLL_INTERVAL", interval)
     calls = []
 
     def factory(state_dir, daemon_name):
@@ -23,6 +27,7 @@ def test_compose_config_wires_disk_provider(tmp_path, monkeypatch):
     ctx = create_context()
     assert calls == [(tmp_path, "expected-daemon")]
     assert ctx.free_space() > 0
+    assert ctx.poll_interval == expected
 
 
 def test_inventory_cli(ctx, capsys):
@@ -95,3 +100,23 @@ def test_serve_gc_interval_resolution(ctx, monkeypatch, args, env, expected):
     monkeypatch.setattr("preview_hub.cli.time.sleep", stop)
     with pytest.raises(KeyboardInterrupt):
         main(["serve", *args], ctx)
+
+
+@pytest.mark.parametrize("interval", ["2s", "0", "-1", "nan", "inf"])
+def test_invalid_health_interval_is_compose_input_error(
+    tmp_path, monkeypatch, capsys, interval
+):
+    monkeypatch.setenv("PHUB_RUNNER", "compose")
+    monkeypatch.setenv("PHUB_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("PHUB_CATALOG", "deploy/hub-stack/catalog.yaml")
+    monkeypatch.setenv("PHUB_HEALTH_POLL_INTERVAL", interval)
+    assert main(["list"]) == 2
+    assert capsys.readouterr().err
+
+
+def test_invalid_health_interval_does_not_affect_fake_context(tmp_path, monkeypatch):
+    monkeypatch.setenv("PHUB_RUNNER", "fake")
+    monkeypatch.setenv("PHUB_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("PHUB_CATALOG", "deploy/hub-stack/catalog.yaml")
+    monkeypatch.setenv("PHUB_HEALTH_POLL_INTERVAL", "2s")
+    assert create_context().poll_interval == 0.1
