@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
+from preview_hub.cli import config_override, load_config
 from preview_hub.contracts import Catalog, InvalidInput, load_yaml
 from preview_hub.registry import Registry
 
@@ -53,6 +54,11 @@ class PollingBot:
             str(comment.get("issue_url", "")),
         )
         if not match:
+            return
+        issue = comment.get("issue")
+        if "/pull/" not in str(comment.get("html_url") or "") and not (
+            isinstance(issue, dict) and "pull_request" in issue
+        ):
             return
         number = int(match[1])
         comment_id = int(comment["id"])
@@ -104,6 +110,8 @@ class PollingBot:
             if not isinstance(author, str) or not author:
                 raise InvalidInput("Comment author is missing")
             if read_error is not None:
+                if read_error.status == 404:
+                    raise InvalidInput("not an open pull request")
                 raise read_error
             if not isinstance(pr, dict):
                 raise InvalidInput("Invalid PR")
@@ -267,7 +275,12 @@ class PollingBot:
                         except GitHubError:
                             # No claim was made: leave the entire cursor unchanged.
                             raise
-                        except Exception:  # noqa: BLE001 - isolate malformed comments
+                        except Exception:
+                            comment_id = comment.get("id")
+                            if not isinstance(
+                                comment_id, int
+                            ) or not self.ledger.contains(comment_id):
+                                raise
                             LOG.warning("Comment handling failed: repo=%s", repo)
                         try:
                             newest = max(
@@ -325,10 +338,19 @@ def parse_interval(value: str) -> float:
 def serve(*, sleep: Callable[[float], None] = time.sleep) -> None:
     # Lazy parsing: unrelated CLI commands must not depend on bot settings.
     interval = parse_interval(os.environ.get("PHUB_BOT_INTERVAL", "20"))
+    config = load_config()
     catalog = Catalog.parse(
-        load_yaml(Path(os.environ.get("PHUB_CATALOG", "/etc/phub/catalog.yaml")))
+        load_yaml(
+            Path(
+                config_override(
+                    config, "PHUB_CATALOG", "catalog", "/etc/phub/catalog.yaml"
+                )
+            )
+        )
     )
-    registry = Registry(Path(os.environ.get("PHUB_STATE_DIR", "/state")))
+    registry = Registry(
+        Path(config_override(config, "PHUB_STATE_DIR", "state_dir", "/state"))
+    )
     api = UrllibGitHubApi()
     bot = PollingBot(catalog, api, Executor(), Ledger(registry))
     logging.basicConfig(level=logging.INFO)

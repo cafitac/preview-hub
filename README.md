@@ -228,7 +228,9 @@ The `phub-bot` container polls catalog repositories every 20 seconds. Set
 It needs no webhook or inbound port.
 
 Create a **fine-grained personal access token** limited to the catalog repositories,
-with **Pull requests: read**, **Issues: read/write**, and **Contents: read**.
+with **Pull requests: read and write**, **Issues: read and write**,
+**Contents: read**, and **Metadata: read** (implicit). PR conversation replies use
+the issues endpoint but require Pull requests write permission.
 Do not use the host's broad `gh` login token. From the MacBook, pipe the token from
 its secure source into `scripts/bot-token` (never put the value in an argument),
 or run `scripts/bot-token`, paste it at the hidden stdin prompt, and press Ctrl-D.

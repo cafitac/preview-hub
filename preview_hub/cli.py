@@ -83,12 +83,16 @@ def config_override(config: dict[str, Any], env: str, key: str, default: str) ->
     return default if value is None else str(value)
 
 
-def create_context() -> Context:
+def load_config() -> dict[str, Any]:
     config_path = os.environ.get("PHUB_CONFIG")
     loaded_config = load_yaml(Path(config_path)) if config_path else None
     if loaded_config is not None and not isinstance(loaded_config, dict):
         raise InvalidInput("PHUB_CONFIG must contain a mapping")
-    config = cast(dict[str, Any], loaded_config) if loaded_config is not None else {}
+    return cast(dict[str, Any], loaded_config) if loaded_config is not None else {}
+
+
+def create_context() -> Context:
+    config = load_config()
     state_dir = Path(config_override(config, "PHUB_STATE_DIR", "state_dir", "/state"))
     catalog_path = Path(
         config_override(config, "PHUB_CATALOG", "catalog", "/etc/phub/catalog.yaml")

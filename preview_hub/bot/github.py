@@ -24,11 +24,13 @@ class GitHubError(RuntimeError):
         retry_at: float = 0,
         attempted: bool = True,
         retryable: bool = False,
+        status: int | None = None,
     ):
         super().__init__(message)
         self.retry_at = retry_at
         self.attempted = attempted
         self.retryable = retryable
+        self.status = status
 
 
 class TokenMissing(GitHubError):
@@ -170,6 +172,7 @@ class UrllibGitHubApi:
                         "GitHub request failed",
                         retry_at=self.retry_at if retry else 0,
                         retryable=retry,
+                        status=exc.code,
                     ) from None
             except (OSError, HTTPException):
                 raise GitHubError("GitHub request failed", retryable=True) from None

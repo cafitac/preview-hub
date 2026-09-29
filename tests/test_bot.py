@@ -49,6 +49,7 @@ class Api:
                 "id": 100,
                 "body": "/preview up backend=old frontend=release ttl=2h",
                 "issue_url": f"https://api.github.com/repos/{REPO}/issues/42",
+                "html_url": f"https://github.com/{REPO}/pull/42#issuecomment-100",
                 "user": {"login": "owner"},
                 "author_association": "OWNER",
                 "updated_at": NOW.isoformat(),
@@ -827,7 +828,7 @@ def test_nullable_author_and_pr_fields_are_rejected(rig, field, missing):
     assert any(repo == REPO for repo, _ in api.closed_polls)
 
 
-def test_unexpected_comment_error_does_not_block_batch_or_sweep(rig, caplog):
+def test_unclaimed_comment_error_stops_batch_and_sweep(rig, caplog):
     bot, api, runner, ledger = rig
     bad = {**api.comments[0], "id": None}
     api.comments = [
@@ -840,10 +841,10 @@ def test_unexpected_comment_error_does_not_block_batch_or_sweep(rig, caplog):
     ]
     with caplog.at_level(logging.WARNING):
         bot.poll()
-    assert len(runner.calls) == 1
-    assert ledger.cursor(REPO)[0] == (NOW + timedelta(seconds=20)).isoformat()
-    assert any(repo == REPO for repo, _ in api.closed_polls)
-    assert "Comment handling failed" in caplog.text
+    assert not runner.calls
+    assert ledger.cursor(REPO)[0] == NOW.isoformat()
+    assert not any(repo == REPO for repo, _ in api.closed_polls)
+    assert "Repository poll failed" in caplog.text
 
 
 def test_closed_retry_set_is_bounded_and_logs_overflow(rig, caplog):
@@ -997,8 +998,106 @@ def test_503_cooldown_then_404_does_not_starve_comments(rig, tmp_path, monkeypat
     bot.poll()
     assert len(calls) == 4
     assert client.retry_at == 0
-    assert len(ledger.rows(("FAILED",))) == 1
+    assert len(ledger.rows(("REJECTED",))) == 1
     assert ledger.cursor(REPO)[0] == api.comments[0]["updated_at"]
     assert not runner.calls
     assert len(api.posts) == 1
-    assert "Unable to read PR" in api.posts[0][2]
+    assert "not an open pull request" in api.posts[0][2]
+    assert "run the command again" not in api.posts[0][2]
+
+
+@pytest.mark.parametrize("method", ["contains", "receive"])
+def test_unclaimed_database_failure_preserves_cursor_and_retries(
+    rig, monkeypatch, method
+):
+    bot, api, runner, ledger = rig
+    original = getattr(ledger, method)
+    api.comments = [
+        {
+            **api.comments[0],
+            "id": identifier,
+            "updated_at": (NOW + timedelta(minutes=offset)).isoformat(),
+        }
+        for identifier, offset in [(100, 1), (101, 3)]
+    ]
+
+    def fail(*args, **kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(ledger, method, fail)
+    bot.poll()
+    assert ledger.cursor(REPO)[0] == NOW.isoformat()
+    assert not runner.calls and not api.posts
+    assert not any(repo == REPO for repo, _ in api.closed_polls)
+    monkeypatch.setattr(ledger, method, original)
+    bot.poll()
+    assert len(runner.calls) == len(api.posts) == 2
+
+
+@pytest.mark.parametrize("issue", [None, {}, {"pull_request": {}}])
+def test_comment_requires_pull_request_evidence(rig, issue):
+    bot, api, runner, ledger = rig
+    api.comments[0]["html_url"] = f"https://github.com/{REPO}/issues/42"
+    api.comments[0]["issue"] = issue
+    reads = []
+    original = api.get_pr
+
+    def get_pr(repo, number):
+        reads.append(number)
+        return original(repo, number)
+
+    api.get_pr = get_pr
+    bot.poll()
+    expected = bool(issue)
+    assert bool(reads) is expected
+    assert ledger.contains(100) is expected
+    assert bool(runner.calls) is expected
+    assert bool(api.posts) is expected
+
+
+@pytest.mark.parametrize("mode", ["config", "empty", "override", "defaults"])
+def test_serve_resolves_shared_cli_configuration(tmp_path, catalog, monkeypatch, mode):
+    from preview_hub.bot import polling
+
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        f"state_dir: {tmp_path / 'configured'}\ncatalog: /configured.yaml\n"
+    )
+    monkeypatch.setenv("PHUB_CONFIG", str(config))
+    for key in ("PHUB_STATE_DIR", "PHUB_CATALOG"):
+        monkeypatch.delenv(key, raising=False)
+    expected_state, expected_catalog = tmp_path / "configured", Path("/configured.yaml")
+    if mode == "empty":
+        monkeypatch.setenv("PHUB_STATE_DIR", "")
+        monkeypatch.setenv("PHUB_CATALOG", "")
+    elif mode == "override":
+        expected_state, expected_catalog = tmp_path / "override", Path("/override.yaml")
+        monkeypatch.setenv("PHUB_STATE_DIR", str(expected_state))
+        monkeypatch.setenv("PHUB_CATALOG", str(expected_catalog))
+    elif mode == "defaults":
+        monkeypatch.setenv("PHUB_CONFIG", "")
+        expected_state, expected_catalog = (
+            Path("/state"),
+            Path("/etc/phub/catalog.yaml"),
+        )
+    paths, states = [], []
+
+    def load(path):
+        paths.append(path)
+
+    def registry(path):
+        states.append(path)
+        return Registry(tmp_path / "actual")
+
+    monkeypatch.setattr(polling, "load_yaml", load)
+    monkeypatch.setattr(polling.Catalog, "parse", lambda value: catalog)
+    monkeypatch.setattr(polling, "Registry", registry)
+    monkeypatch.setattr(polling.UrllibGitHubApi, "token_present", lambda self: False)
+
+    def stop(seconds):
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        polling.serve(sleep=stop)
+    assert paths == [expected_catalog]
+    assert states == [expected_state]
