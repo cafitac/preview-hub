@@ -22,7 +22,7 @@ services:
   bot:
     image: phub/hub:local
     container_name: phub-bot
-    user: "0:0"
+    user: "${PHUB_UID_GID:-0:0}"
     command: [phub, bot]
     restart: unless-stopped
     environment:

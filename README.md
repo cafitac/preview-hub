@@ -103,11 +103,12 @@ U3's stale-operation recovery. `PHUB_GC_INTERVAL` changes the default interval.
 Shared cached service images have service labels, not environment labels.
 
 The image defaults to UID 1000. The stack explicitly uses root because Colima's
-Docker socket is normally root-owned. To run the hub as UID 1000, first grant its
-GID socket access and make both named volumes writable, then set
+Docker socket is normally root-owned. The hub and bot use the same UID/GID.
+To run both as UID 1000, grant their GID socket access and make both named volumes writable, then set
 `PHUB_UID_GID=1000:<socket-gid>` when starting the stack. Socket access grants
-control of the dedicated VM regardless of UID. Traefik has a read-only socket
-mount, Docker-provider ownership constraint, and opt-in routing labels.
+control of the dedicated VM regardless of UID. The bot token file must also be
+readable by that UID. Both services need socket access and writable volumes.
+Traefik has a read-only socket mount, Docker-provider ownership constraint, and opt-in routing labels.
 
 Application and init containers use the manifest memory limit; PostgreSQL uses
 512 MiB. PostgreSQL starts and becomes healthy before ordered migration/seed
@@ -259,11 +260,17 @@ catalog are allowed. Forks, closed PRs and malformed commands run nothing.
 Commands execute only through `docker exec phub-hub phub`; the mounted Docker
 socket is privileged, so this is a code restriction, not daemon-enforced isolation.
 The bot never includes the token in command arguments, logs, replies or its repr.
+On first start, or when a repository cursor is missing (including a recreated
+state volume), the bot initializes its comment cursor to its start time in UTC.
+Older comments are ignored, including history returned by the overlap window;
+the bot never replays historical commands. Existing cursors resume polling.
 A durable comment-ID ledger prevents re-execution across overlapping polls and
-restarts. Interrupted commands become FAILED after ten minutes and need a new
-comment. Unsent replies have at most three delivery attempts per process lifetime;
-a restart resets the in-memory count and retry delay. GitHub POST
-acknowledgement loss can still cause a duplicate reply, since GitHub provides no
-idempotency key for issue comments. Retries rebuild replies from the stored bot comment status, environment and error,
-plus a fresh `phub status <env> --format json` when an environment exists.
+restarts while the ledger is retained. Interrupted commands become FAILED after
+ten minutes and need a new comment. Reply retries are best-effort, in memory,
+with at most three POST attempts per process. The initial reply body is retained
+until delivery succeeds. A restart can drop or repeat an unacknowledged reply:
+it loses the original body, attempt count and retry delay. After restart, replies
+are rebuilt from stored status, environment and error plus a fresh
+`phub status <env> --format json` when an environment exists. GitHub provides no
+idempotency key for issue comments, so acknowledgement loss can cause duplicates.
 Bot data is stored only in the revision-2 bot tables, never in schema metadata.

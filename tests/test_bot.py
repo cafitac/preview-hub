@@ -317,7 +317,7 @@ def test_closed_pr_sweep_retries_failure_without_advancing(rig):
                 NOW.isoformat(),
             ),
         )
-    initial = ledger.cursor(REPO)[1]
+    initial = ledger.cursor(REPO, NOW.isoformat())[1]
     runner.code = 5
     bot.poll()
     assert ledger.cursor(REPO)[1] == initial
@@ -377,7 +377,7 @@ def test_reply_limit_resets_on_restart(rig, catalog):
     for _ in range(6):
         restarted.poll()
     assert len(api.posts) == 6
-    assert [args[4] for args in runner.calls] == ["up"] + ["status"] * 5
+    assert [args[4] for args in runner.calls] == ["up"] + ["status"] * 3
     assert ledger.rows(("DONE",))[0]["reply_comment_id"] is None
     with ledger.registry.connect() as db:
         assert [row[0] for row in db.execute("SELECT key FROM schema_meta")] == [
@@ -393,9 +393,9 @@ def test_unsent_reply_succeeds_on_next_poll(rig):
     bot.poll()
     bot.poll()
     assert len(api.posts) == 2
-    assert [args[4:] for args in runner.calls[1:]] == [
-        ["status", "pr-backend-42", "--format", "json"]
-    ]
+    assert len(runner.calls) == 1
+    assert api.posts[0][2] == api.posts[1][2]
+    assert not ledger.initial_replies
     assert ledger.rows(("DONE",))[0]["reply_comment_id"] == 902
 
 
@@ -551,7 +551,7 @@ def test_failed_poll_does_not_advance_cursor(rig):
         raise GitHubError("unavailable")
 
     api.list_issue_comments = fail
-    before = ledger.cursor(REPO)[0]
+    before = ledger.cursor(REPO, NOW.isoformat())[0]
     bot.poll()
     assert ledger.cursor(REPO)[0] == before
     assert not runner.calls
@@ -608,3 +608,139 @@ def test_token_appearing_starts_polling_without_restart(
         polling.serve(sleep=sleep)
     assert polls == [True]
     assert caplog.text.count("token missing") == 1
+
+
+@pytest.mark.parametrize("edited", [False, True])
+def test_missing_cursor_skips_history_even_in_overlap(rig, edited):
+    bot, api, runner, ledger = rig
+    old = copy.deepcopy(api.comments[0])
+    old["id"] = 99
+    old["body"] = "/preview down"
+    old["created_at"] = (NOW - timedelta(seconds=30)).isoformat()
+    old["updated_at"] = NOW.isoformat() if edited else old["created_at"]
+    api.comments = [old]
+    bot.clock = lambda: NOW + timedelta(minutes=1)
+    bot.poll()
+    assert ledger.cursor(REPO)[0] == NOW.isoformat()
+    assert api.polls[0] == (REPO, overlap(NOW.isoformat()))
+    assert not runner.calls and not api.posts
+    assert not ledger.rows(("DONE", "REJECTED"))
+    api.comments.append({**old, "id": 101, "created_at": NOW.isoformat()})
+    api.comments[-1]["updated_at"] = NOW.isoformat()
+    bot.poll()
+    assert len(runner.calls) == len(api.posts) == 1
+
+
+@pytest.mark.parametrize("code", [0, 5])
+def test_original_reply_survives_failed_post(rig, code):
+    bot, api, runner, ledger = rig
+    runner.code = code
+    api.fail_post = True
+    bot.poll()
+    original = api.posts[0][2]
+    assert ledger.initial_replies[100] == original
+    if code:
+        assert "Stage: build" in original
+        assert "Service: backend" in original
+        assert "compiler error" in original
+    runner.code = 0
+    api.fail_post = False
+    bot.poll()
+    assert api.posts[1][2] == original
+    assert len(runner.calls) == 1
+    assert not ledger.initial_replies
+
+
+@pytest.mark.parametrize("where", ["cursor", "comments", "closed"])
+def test_repository_exception_does_not_stop_other_repositories(
+    rig, monkeypatch, caplog, where
+):
+    bot, api, _runner, ledger = rig
+    target, name = {
+        "cursor": (ledger, "cursor"),
+        "comments": (api, "list_issue_comments"),
+        "closed": (api, "list_closed_prs"),
+    }[where]
+    original = getattr(target, name)
+
+    def fail(repo, *args):
+        if repo == REPO:
+            raise sqlite3.OperationalError("secret-token response-body")
+        return original(repo, *args)
+
+    monkeypatch.setattr(target, name, fail)
+    with caplog.at_level(logging.WARNING):
+        bot.poll()
+    assert any(repo == "owner/frontend" for repo, _since in api.polls)
+    assert "Repository poll failed" in caplog.text
+    assert "secret-token" not in caplog.text and "response-body" not in caplog.text
+
+
+@pytest.mark.parametrize("stop", [KeyboardInterrupt, SystemExit])
+def test_serve_continues_after_poll_exception(
+    tmp_path, catalog, monkeypatch, caplog, stop
+):
+    from preview_hub.bot import polling
+
+    class PresentApi:
+        def token_present(self):
+            return True
+
+    monkeypatch.setattr(polling, "UrllibGitHubApi", PresentApi)
+    monkeypatch.setattr(polling, "load_yaml", lambda path: None)
+    monkeypatch.setattr(polling.Catalog, "parse", lambda value: catalog)
+    monkeypatch.setenv("PHUB_STATE_DIR", str(tmp_path))
+    calls = []
+
+    def poll(self):
+        calls.append(True)
+        if len(calls) == 1:
+            raise TypeError("secret-token response-body")
+        if len(calls) == 3:
+            raise stop
+
+    monkeypatch.setattr(polling.PollingBot, "poll", poll)
+    sleeps = []
+    with caplog.at_level(logging.WARNING), pytest.raises(stop):
+        polling.serve(sleep=sleeps.append)
+    assert len(calls) == 3 and len(sleeps) == 2
+    assert caplog.text.count("Bot poll failed") == 1
+    assert "secret-token" not in caplog.text and "response-body" not in caplog.text
+
+
+def test_reply_body_and_budget_are_lost_on_restart(rig):
+    bot, api, _runner, ledger = rig
+    api.fail_post = True
+    for _ in range(4):
+        bot.poll()
+    assert len(api.posts) == 3
+    assert ledger.initial_replies
+    restarted = Ledger(Registry(ledger.registry.state_dir))
+    assert not restarted.initial_replies
+    assert restarted.claim_reply(100, NOW.timestamp())
+
+
+def test_hub_and_bot_share_configurable_uid_and_state_volume():
+    from preview_hub.contracts import load_yaml
+
+    services = load_yaml(Path("deploy/hub-stack/compose.yaml"))["services"]
+    for name in ("hub", "bot"):
+        assert services[name]["user"] == "${PHUB_UID_GID:-0:0}"
+        assert "phub-state:/state" in services[name]["volumes"]
+        assert "/var/run/docker.sock:/var/run/docker.sock" in services[name]["volumes"]
+
+
+def test_overlap_still_accepts_delayed_comments_after_initial_floor(rig):
+    bot, api, runner, _ledger = rig
+    api.comments[0]["updated_at"] = (NOW + timedelta(seconds=30)).isoformat()
+    bot.poll()
+    api.comments = [
+        {
+            **api.comments[0],
+            "id": 101,
+            "created_at": (NOW + timedelta(seconds=10)).isoformat(),
+            "updated_at": (NOW + timedelta(seconds=10)).isoformat(),
+        }
+    ]
+    bot.poll()
+    assert len(runner.calls) == len(api.posts) == 2

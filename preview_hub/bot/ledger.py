@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from preview_hub.registry import Registry
@@ -11,6 +11,8 @@ EPOCH = "1970-01-01T00:00:00+00:00"
 class Ledger:
     def __init__(self, registry: Registry):
         self.registry = registry
+        # Best-effort reply state: at most three POST attempts per process.
+        # Restarting loses bodies and retry budgets; unacknowledged replies may repeat.
         self.initial_replies: dict[int, str] = {}
         self.attempts: dict[int, int] = {}
         self.retry_at: dict[int, float] = {}
@@ -89,13 +91,18 @@ class Ledger:
                 (reply_id, comment_id),
             )
 
-    def cursor(self, repo: str) -> tuple[str, str]:
+    def cursor(self, repo: str, start: str | None = None) -> tuple[str, str]:
         with self.registry.transaction() as db:
+            db.execute(
+                "INSERT OR IGNORE INTO bot_cursors VALUES (?,?,?)",
+                (repo, start or datetime.now(UTC).isoformat(), EPOCH),
+            )
             row = db.execute(
                 "SELECT comments_since,closed_checked_at FROM bot_cursors WHERE repo=?",
                 (repo,),
             ).fetchone()
-            return (row[0], row[1]) if row else (EPOCH, EPOCH)
+            assert row is not None
+            return row[0], row[1]
 
     def advance(
         self, repo: str, *, comments: str | None = None, closed: str | None = None

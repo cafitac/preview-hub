@@ -142,7 +142,7 @@ class UrllibGitHubApi:
                         delay = 60
                 exc.close()
                 delay = max(0, delay) if math.isfinite(delay) else 60
-                # Posts are retried only by the durable outbox (three total attempts).
+                # POST retries are best-effort, in memory (at most three per process).
                 # Never retry a potentially accepted POST within this HTTP call.
                 if (
                     method == "POST"

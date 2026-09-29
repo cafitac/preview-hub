@@ -36,6 +36,8 @@ class PollingBot:
         self.executor = executor
         self.ledger = ledger
         self.clock = clock
+        self.started_at = clock().astimezone(UTC).isoformat()
+        self.comment_floors: dict[str, datetime] = {}
 
     def handle(self, repo: str, comment: dict[str, Any]) -> None:
         body = str(comment.get("body") or "").strip()
@@ -159,7 +161,7 @@ class PollingBot:
                 row["comment_id"], self.clock().timestamp()
             ):
                 continue
-            body = self.ledger.initial_replies.pop(row["comment_id"], None)
+            body = self.ledger.initial_replies.get(row["comment_id"])
             if body is None:
                 environment = row["environment"] or "unknown"
                 data: dict[str, Any] = {"state": row["status"]}
@@ -184,45 +186,64 @@ class PollingBot:
                 LOG.warning("Reply delivery failed: comment=%s", row["comment_id"])
             else:
                 self.ledger.replied(row["comment_id"], reply_id)
+                self.ledger.initial_replies.pop(row["comment_id"], None)
 
     def poll(self) -> None:
         self.recover()
         for repo in sorted({entry.repo for entry in self.catalog.services.values()}):
-            comments_since, closed_since = self.ledger.cursor(repo)
             try:
-                comments = self.api.list_issue_comments(repo, overlap(comments_since))
-                newest = datetime.fromisoformat(comments_since)
-                for comment in sorted(
-                    comments, key=lambda row: (row["updated_at"], row["id"])
-                ):
-                    self.handle(repo, comment)
-                    newest = max(newest, datetime.fromisoformat(comment["updated_at"]))
-                self.ledger.advance(repo, comments=newest.isoformat())
-            except GitHubError:
-                LOG.warning("Comment poll failed: repo=%s", repo)
-            try:
-                scan_started = self.clock().isoformat()
-                closed = self.api.list_closed_prs(repo, overlap(closed_since))
-                services = [
-                    name
-                    for name, entry in self.catalog.services.items()
-                    if entry.repo == repo
-                ]
-                if len(services) != 1:
-                    continue
-                complete = True
-                for pr in closed:
-                    if pr.get("state") != "closed" or repository(pr, "base") != repo:
+                comments_since, closed_since = self.ledger.cursor(repo, self.started_at)
+                floor = self.comment_floors.setdefault(
+                    repo, datetime.fromisoformat(comments_since)
+                )
+                try:
+                    comments = self.api.list_issue_comments(
+                        repo, overlap(comments_since)
+                    )
+                    newest = datetime.fromisoformat(comments_since)
+                    for comment in sorted(
+                        comments, key=lambda row: (row["updated_at"], row["id"])
+                    ):
+                        # The API overlap may return history, including edited old comments.
+                        created = comment.get("created_at", comment["updated_at"])
+                        if datetime.fromisoformat(created) < floor:
+                            continue
+                        self.handle(repo, comment)
+                        newest = max(
+                            newest, datetime.fromisoformat(comment["updated_at"])
+                        )
+                    self.ledger.advance(repo, comments=newest.isoformat())
+                except GitHubError:
+                    LOG.warning("Comment poll failed: repo=%s", repo)
+                try:
+                    scan_started = self.clock().isoformat()
+                    closed = self.api.list_closed_prs(repo, overlap(closed_since))
+                    services = [
+                        name
+                        for name, entry in self.catalog.services.items()
+                        if entry.repo == repo
+                    ]
+                    if len(services) != 1:
                         continue
-                    name = environment_name(services[0], int(pr["number"]))
-                    env = self.ledger.registry.get(name)
-                    if env is not None and env["state"] != "DELETED":
-                        result = self.executor.execute(Command("down", {}), name)
-                        complete = complete and result.code == 0
-                if complete:
-                    self.ledger.advance(repo, closed=scan_started)
-            except (GitHubError, InvalidInput):
-                LOG.warning("Closed PR sweep failed: repo=%s", repo)
+                    complete = True
+                    for pr in closed:
+                        if (
+                            pr.get("state") != "closed"
+                            or repository(pr, "base") != repo
+                        ):
+                            continue
+                        name = environment_name(services[0], int(pr["number"]))
+                        env = self.ledger.registry.get(name)
+                        if env is not None and env["state"] != "DELETED":
+                            result = self.executor.execute(Command("down", {}), name)
+                            complete = complete and result.code == 0
+                    if complete:
+                        self.ledger.advance(repo, closed=scan_started)
+                except (GitHubError, InvalidInput):
+                    LOG.warning("Closed PR sweep failed: repo=%s", repo)
+            except Exception:  # noqa: BLE001 - keep polling without leaking exception data
+                # Exception text may contain credentials or response bodies.
+                LOG.warning("Repository poll failed: repo=%s", repo)
         self.replies()
 
 
@@ -254,10 +275,14 @@ def serve(*, sleep: Callable[[float], None] = time.sleep) -> None:
     with (registry.state_dir / "bot.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         while True:
-            if not api.token_present():
-                if not missing_logged:
-                    LOG.warning("token missing")
-                    missing_logged = True
-            else:
-                bot.poll()
+            try:
+                if not api.token_present():
+                    if not missing_logged:
+                        LOG.warning("token missing")
+                        missing_logged = True
+                else:
+                    bot.poll()
+            except Exception:  # noqa: BLE001 - keep polling without leaking exception data
+                # Do not log exception messages or tracebacks containing API data.
+                LOG.warning("Bot poll failed")
             sleep(interval)
