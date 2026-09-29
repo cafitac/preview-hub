@@ -83,6 +83,27 @@ class Api:
             raise GitHubError("unavailable")
         return 900 + len(self.posts)
 
+    def get_authenticated_user(self):
+        return "bot"
+
+    def list_pr_comments(self, repo, number):
+        return [
+            {"id": 901 + index, "body": body, "user": {"login": "bot"}}
+            for index, (posted_repo, posted_number, body) in enumerate(self.posts)
+            if (posted_repo, posted_number) == (repo, number)
+        ]
+
+    def edit_comment(self, repo, comment_id, body):
+        old_repo, number, _body = self.posts[comment_id - 901]
+        assert old_repo == repo
+        self.posts[comment_id - 901] = (repo, number, body)
+
+    def list_branches(self, repo):
+        return []
+
+    def list_open_prs(self, repo):
+        return []
+
 
 class Runner:
     def __init__(self):
@@ -458,7 +479,7 @@ def test_revision_one_migration(tmp_path):
             db.execute("SELECT value FROM schema_meta WHERE key='version'").fetchone()[
                 0
             ]
-            == "2"
+            == "3"
         )
         assert [row[1] for row in db.execute("PRAGMA table_info(bot_comments)")] == [
             "comment_id",
@@ -1138,3 +1159,20 @@ def test_executor_preserves_other_service_pr_ref(action, catalog):
             "json",
         ]
     ]
+
+
+def test_link_reconcile_failure_keeps_polling(rig, monkeypatch, caplog):
+    bot, api, runner, _ledger = rig
+    calls = []
+
+    def fail():
+        calls.append(len(runner.calls))
+        raise RuntimeError("secret")
+
+    monkeypatch.setattr(bot.links, "reconcile", fail)
+    bot.poll()
+    bot.poll()
+    assert len(calls) == 2 and calls[0] > 0
+    assert len(api.posts) == 1
+    assert "Cross-link reconcile failed" in caplog.text
+    assert "secret" not in caplog.text

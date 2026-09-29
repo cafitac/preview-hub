@@ -265,3 +265,22 @@ def test_edit_comment_patch_payload_and_retry(token_path):
     assert api.edit_comment("org/backend", 9, "updated") is None
     assert len(calls) == 2
     assert sleeps == [1]
+
+
+def test_link_identity_and_paginated_comments(token_path):
+    paths = []
+
+    def transport(request, *, timeout):
+        paths.append(request.full_url)
+        assert request.method == "GET"
+        if request.full_url.endswith("/user"):
+            data = {"login": "bot"}
+        else:
+            assert "/issues/42/comments?" in request.full_url
+            data = [{"id": 1}] * (100 if request.full_url.endswith("page=1") else 1)
+        return io.BytesIO(json.dumps(data).encode())
+
+    api = UrllibGitHubApi(token_path, transport=transport)
+    assert api.get_authenticated_user() == "bot"
+    assert len(api.list_pr_comments("owner/backend", 42)) == 101
+    assert paths[-1].endswith("page=2")
