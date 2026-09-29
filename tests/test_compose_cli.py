@@ -41,11 +41,12 @@ def test_serve_runs_gc_before_wait(ctx, monkeypatch):
         "preview_hub.cli.ExpireEnvironments.execute", lambda self: calls.append("gc")
     )
 
-    def stop(seconds):
+    def stop(gc, seconds):
+        gc()
         calls.append(seconds)
         raise KeyboardInterrupt
 
-    monkeypatch.setattr("preview_hub.cli.time.sleep", stop)
+    monkeypatch.setattr("preview_hub.web.server.serve", stop)
     with pytest.raises(KeyboardInterrupt):
         main(["serve", "--interval", "15"], ctx)
     assert calls == ["gc", 15]
@@ -93,11 +94,11 @@ def test_invalid_gc_interval_is_serve_input_error(monkeypatch, capsys):
 def test_serve_gc_interval_resolution(ctx, monkeypatch, args, env, expected):
     monkeypatch.setenv("PHUB_GC_INTERVAL", env)
 
-    def stop(seconds):
+    def stop(gc, seconds):
         assert seconds == expected
         raise KeyboardInterrupt
 
-    monkeypatch.setattr("preview_hub.cli.time.sleep", stop)
+    monkeypatch.setattr("preview_hub.web.server.serve", stop)
     with pytest.raises(KeyboardInterrupt):
         main(["serve", *args], ctx)
 
@@ -131,7 +132,7 @@ def test_serve_rejects_nonpositive_or_nonfinite_interval_before_loop(
         pytest.fail("Invalid interval must be rejected before GC or sleep")
 
     monkeypatch.setattr("preview_hub.cli.ExpireEnvironments.execute", unexpected)
-    monkeypatch.setattr("preview_hub.cli.time.sleep", unexpected)
+    monkeypatch.setattr("preview_hub.web.server.serve", unexpected)
     monkeypatch.setenv(
         "PHUB_GC_INTERVAL", interval if source == "environment" else "900"
     )

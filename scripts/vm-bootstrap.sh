@@ -51,8 +51,14 @@ colima ssh --profile preview-hub -- sudo mkdir -p /opt/phub
 colima ssh --profile preview-hub -- sudo mkdir -p -m 0700 /opt/phub/secrets
 colima ssh --profile preview-hub -- sudo chown "$uid_gid" /opt/phub/secrets
 colima ssh --profile preview-hub -- sudo chmod 0700 /opt/phub/secrets
-colima ssh --profile preview-hub -- sudo cp "$context/repo/deploy/hub-stack/compose.yaml" "$context/repo/deploy/hub-stack/catalog.yaml" /opt/phub/
+colima ssh --profile preview-hub -- sudo cp "$context/repo/deploy/hub-stack/compose.yaml" "$context/repo/deploy/hub-stack/catalog.yaml" "$context/repo/deploy/hub-stack/cloudflared.yml" /opt/phub/
 "$docker" --context colima-preview-hub run --rm --user 0:0 -v /var/run/docker.sock:/var/run/docker.sock -v /opt/phub:/opt/phub -w /opt/phub phub/hub:local docker compose -p phub-hub -f /opt/phub/compose.yaml up -d
+if colima ssh --profile preview-hub -- sudo test -f /opt/phub/secrets/tunnel.json </dev/null &&
+   colima ssh --profile preview-hub -- sudo test -f /opt/phub/public.env </dev/null; then
+    "$docker" --context colima-preview-hub run --rm --user 0:0 -v /var/run/docker.sock:/var/run/docker.sock -v /opt/phub:/opt/phub -w /opt/phub phub/hub:local docker compose --env-file /opt/phub/public.env -p phub-hub -f /opt/phub/compose.yaml --profile public up -d
+else
+    echo 'public access not configured'
+fi
 REMOTE
 )
 command="export PATH=$(quote "$remote_path"); sh -c $(quote "$remote_script") sh $(quote "$mode") $(quote "$ref") $(quote "$repo") $(quote "$remote_docker") $(quote "$uid_gid")"

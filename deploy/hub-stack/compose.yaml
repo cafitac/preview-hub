@@ -6,6 +6,9 @@ services:
     # only after granting that uid socket access and ownership of both volumes.
     user: "${PHUB_UID_GID:-0:0}"
     command: [phub, serve]
+    env_file:
+      - path: /opt/phub/public.env
+        required: false
     restart: unless-stopped
     environment:
       PHUB_RUNNER: compose
@@ -38,6 +41,21 @@ services:
     labels:
       dev.phub.managed: "true"
       dev.phub.service: bot
+  cloudflared:
+    image: cloudflare/cloudflared:2025.2.1
+    container_name: phub-cloudflared
+    user: "${PHUB_UID_GID:-0:0}"
+    profiles: [public]
+    command: [tunnel, --no-autoupdate, --config, /etc/cloudflared/config.yml, run, "${PHUB_TUNNEL_ID:-}"]
+    restart: unless-stopped
+    environment:
+      PHUB_TUNNEL_ID: "${PHUB_TUNNEL_ID:-}"
+    volumes:
+      - ./cloudflared.yml:/etc/cloudflared/config.yml:ro
+      - /opt/phub/secrets/tunnel.json:/etc/cloudflared/tunnel.json:ro
+    labels:
+      dev.phub.managed: "true"
+      dev.phub.service: cloudflared
   proxy:
     image: traefik:v3
     container_name: phub-proxy

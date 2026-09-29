@@ -86,6 +86,12 @@
               "HEALTHY",
               "UNHEALTHY"
             ]
+          },
+          "localUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -136,6 +142,18 @@
       "required": [
         "allHealthy",
         "checkedAt"
+      ],
+      "additionalProperties": false
+    },
+    "access": {
+      "type": "object",
+      "properties": {
+        "provider": {
+          "const": "cloudflare-access"
+        }
+      },
+      "required": [
+        "provider"
       ],
       "additionalProperties": false
     }

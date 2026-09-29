@@ -40,6 +40,7 @@ class ServicePlan:
     labels: dict[str, str]
     resources: tuple[ResourcePlan, ...] = ()
     changed: bool = True
+    local_url: str | None = None
 
 
 @dataclass(frozen=True)

@@ -40,13 +40,27 @@ class PlanBuilder:
 
         for name in manifests:
             visit(name)
-        public = {
+        local = {
             n: catalog.public_url_template.format(
                 subdomain=m.expose["subdomain"], env=env
             )
             for n, m in manifests.items()
             if m.expose
         }
+        public = dict(local)
+        if access := catalog.public_access:
+            origin = "https://" + access.host_template.format(env=env)
+            public = {
+                name: origin
+                + (
+                    ""
+                    if name == access.entry_service
+                    else access.path_template.format(
+                        subdomain=manifests[name].expose["subdomain"]
+                    )
+                )
+                for name in local
+            }
         internal = {n: f"http://{n}:{m.run['port']}" for n, m in manifests.items()}
         prior_services = {s.name: s for s in previous.services} if previous else {}
         services: list[ServicePlan] = []
@@ -137,6 +151,7 @@ class PlanBuilder:
                     own_labels,
                     tuple(own),
                     changed is None or name in changed,
+                    local.get(name) if catalog.public_access else None,
                 )
             )
             service = services[-1]

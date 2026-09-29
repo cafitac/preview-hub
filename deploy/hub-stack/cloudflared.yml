@@ -1,0 +1,8 @@
+# The tunnel ID is passed to `tunnel run` by Compose, not interpolated here.
+credentials-file: /etc/cloudflared/tunnel.json
+ingress:
+  - hostname: preview-hub.cafitac.com
+    service: http://phub-hub:8080
+  - hostname: '*.cafitac.com'
+    service: http://phub-proxy:80
+  - service: http_status:404

@@ -2,7 +2,7 @@
 name = "preview-hub"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = ["jsonschema[format-nongpl]>=4.23", "PyYAML>=6.0"]
+dependencies = ["jsonschema[format-nongpl]>=4.23", "PyYAML>=6.0", "starlette>=0.40", "uvicorn>=0.30", "jinja2>=3.1", "PyJWT[crypto]>=2.9"]
 [project.scripts]
 phub = "preview_hub.cli:main"
 [build-system]
@@ -13,7 +13,7 @@ packages = ["preview_hub"]
 [tool.hatch.build.targets.wheel.force-include]
 "schemas" = "preview_hub/schemas"
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.9", "pyright>=1.1.390", "types-PyYAML", "types-jsonschema"]
+dev = ["httpx>=0.27", "pytest>=8", "ruff>=0.9", "pyright>=1.1.390", "types-PyYAML", "types-jsonschema"]
 [tool.pyright]
 include = ["preview_hub"]
 typeCheckingMode = "strict"

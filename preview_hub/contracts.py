@@ -131,6 +131,43 @@ class CatalogEntry:
     include: str = "always"
 
 
+def is_hostname(value: str) -> bool:
+    return (
+        len(value) <= 253
+        and len(value.split(".")) >= 2
+        and all(
+            re.fullmatch(r"[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?", label)
+            for label in value.split(".")
+        )
+    )
+
+
+@dataclass(frozen=True)
+class PublicAccess:
+    host_template: str
+    entry_service: str
+    path_template: str
+    dashboard_host: str
+
+    def __post_init__(self) -> None:
+        host = self.host_template.replace("{env}", "a" * 31)
+        label = host.split(".")[0]
+        if (
+            self.host_template.count("{env}") != 1
+            or "{env}" not in self.host_template.split(".")[0]
+            or not is_hostname(host)
+            or not re.fullmatch(r"phub-[a-z0-9-]+", label)
+        ):
+            raise InvalidInput("Invalid public host_template")
+        path = self.path_template.replace("{subdomain}", "api")
+        if "{subdomain}" not in self.path_template or not re.fullmatch(
+            r"/[a-zA-Z0-9/_-]+", path
+        ):
+            raise InvalidInput("Invalid public path_template")
+        if not is_hostname(self.dashboard_host):
+            raise InvalidInput("Invalid dashboard_host")
+
+
 @dataclass(frozen=True)
 class Catalog:
     services: dict[str, CatalogEntry]
@@ -140,12 +177,18 @@ class Catalog:
     default_ttl: str = "24h"
     max_ttl: str = "7d"
 
+    public_access: PublicAccess | None = None
+
     @classmethod
     def parse(cls, value: object) -> Catalog:
         d = validate("catalog", value)
+        access = PublicAccess(**d["public_access"]) if "public_access" in d else None
+        if access and access.entry_service not in d["services"]:
+            raise InvalidInput("public entry_service must be a catalog service")
         return cls(
             {k: CatalogEntry(**v) for k, v in d["services"].items()},
             d["public_url_template"],
+            public_access=access,
             **d["limits"],
         )
 

@@ -9,7 +9,7 @@ import threading
 import time
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -256,12 +256,30 @@ def _provision(
                 changed,
                 previous_plan,
             )
-            with ctx.registry.transaction() as db:
-                for service in plan.services:
-                    db.execute(
-                        "UPDATE environment_services SET image=?,public_url=? WHERE environment_id=? AND service=?",
-                        (service.image, service.public_url, env_id, service.name),
+            # The reconstructed previous plan uses today's catalog. Persisted URLs
+            # record the applied routes, including those from an older catalog.
+            changed_urls = {
+                service.name
+                for service in plan.services
+                if service.name in previous
+                and previous[service.name]["public_url"] != service.public_url
+            }
+            plan = replace(
+                plan,
+                services=tuple(
+                    replace(
+                        service,
+                        changed=service.changed
+                        or service.name in changed_urls
+                        or any(
+                            "${services." + target + ".public_url}" in value
+                            for target in changed_urls
+                            for value in service.manifest.env.values()
+                        ),
                     )
+                    for service in plan.services
+                ),
+            )
             _state(ctx, env_id, "STARTING", op)
             stage, current = "start", None
             result = ctx.runner.apply(plan)
@@ -274,6 +292,12 @@ def _provision(
                         result.log_excerpt or result.message[-2000:],
                     )
                 )
+            with ctx.registry.transaction() as db:
+                for service in plan.services:
+                    db.execute(
+                        "UPDATE environment_services SET image=?,public_url=? WHERE environment_id=? AND service=?",
+                        (service.image, service.public_url, env_id, service.name),
+                    )
             stage = "health"
             deadlines = {
                 s.name: time.monotonic() + duration(str(s.manifest.health["timeout"]))

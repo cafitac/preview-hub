@@ -7,7 +7,6 @@ import json
 import math
 import os
 import sys
-import time
 from contextlib import ExitStack
 from dataclasses import asdict
 from pathlib import Path
@@ -42,7 +41,12 @@ class LogReader(Protocol):
     def logs(self, env: str, service: str, tail: int = 100) -> str: ...
 
 
-def descriptor(env: dict[str, Any], template: str) -> dict[str, Any]:
+def descriptor(
+    env: dict[str, Any],
+    template: str,
+    local_urls: dict[str, str] | None = None,
+    entry_service: str = "frontend",
+) -> dict[str, Any]:
     services = [
         {
             "name": s["service"],
@@ -54,6 +58,9 @@ def descriptor(env: dict[str, Any], template: str) -> dict[str, Any]:
         }
         for s in env["services"]
     ]
+    if local_urls is not None:
+        for service in services:
+            service["localUrl"] = local_urls.get(service["name"])
     urls = {s["name"]: s["publicUrl"] for s in services if s["publicUrl"]}
     result = {
         "apiVersion": "preview-hub/v1",
@@ -62,7 +69,7 @@ def descriptor(env: dict[str, Any], template: str) -> dict[str, Any]:
         "state": env["state"],
         "createdAt": env["created_at"],
         "expiresAt": env["ttl_expires_at"],
-        "entryUrl": urls.get("frontend", next(iter(urls.values()), None)),
+        "entryUrl": urls.get(entry_service, next(iter(urls.values()), None)),
         "proxy": {
             "hostPort": urlsplit(template).port or 80,
             "inNetworkAddress": "phub-proxy:80",
@@ -76,6 +83,8 @@ def descriptor(env: dict[str, Any], template: str) -> dict[str, Any]:
             "checkedAt": env["updated_at"],
         },
     }
+    if local_urls is not None:
+        result["access"] = {"provider": "cloudflare-access"}
     return validate("environment-descriptor", result)
 
 
@@ -190,9 +199,10 @@ def main(argv: list[str] | None = None, context: Context | None = None) -> int:
                 raise InvalidInput("GC interval must be finite and positive")
         ctx = context or create_context()
         if args.command == "serve":
-            while True:
-                main(["gc", "--format", "json"], ctx)
-                time.sleep(args.interval)
+            from .web.server import serve
+
+            serve(lambda: main(["gc", "--format", "json"], ctx), args.interval)
+            return 0
         actor = f"cli:{getpass.getuser()}"
         refs: dict[str, str] = {}
         for value in getattr(args, "refs", []):
@@ -265,8 +275,28 @@ def main(argv: list[str] | None = None, context: Context | None = None) -> int:
         if args.format == "descriptor":
             if not isinstance(result, dict) or "services" not in result:
                 raise InvalidInput("Descriptor format requires one environment")
+            result = cast(dict[str, Any], result)
+            local_urls: dict[str, str] | None = None
+            entry_service = "frontend"
+            if access := ctx.catalog.public_access:
+                entry_service = access.entry_service
+                local_urls = {}
+                for service in result["services"]:
+                    manifest = ctx.git.read_manifest(
+                        service["repo"], service["commit_sha"]
+                    )
+                    if manifest.expose:
+                        local_urls[service["service"]] = (
+                            ctx.catalog.public_url_template.format(
+                                env=result["name"],
+                                subdomain=manifest.expose["subdomain"],
+                            )
+                        )
             result = descriptor(
-                cast(dict[str, Any], result), ctx.catalog.public_url_template
+                cast(dict[str, Any], result),
+                ctx.catalog.public_url_template,
+                local_urls,
+                entry_service,
             )
         if args.format in {"json", "descriptor"}:
             print(json.dumps(result, indent=2))

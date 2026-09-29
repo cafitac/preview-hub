@@ -9,7 +9,10 @@ import yaml
 ROOT = Path(__file__).parents[1]
 
 
-def test_installer_streams_stdin_not_arguments(tmp_path):
+@pytest.mark.parametrize(
+    "script,noun", [("bot-token", "token"), ("tunnel-credentials", "credentials")]
+)
+def test_installer_streams_stdin_not_arguments(tmp_path, script, noun):
     fake = tmp_path / "ssh"
     fake.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$ARGS"\ncat > "$INPUT"\n')
     fake.chmod(0o755)
@@ -24,7 +27,7 @@ def test_installer_streams_stdin_not_arguments(tmp_path):
         "PHUB_SSH_OPTS": "-o BatchMode=yes",
     }
     result = subprocess.run(
-        [str(ROOT / "scripts/bot-token")],
+        [str(ROOT / "scripts" / script)],
         input="fake-secret",
         text=True,
         capture_output=True,
@@ -35,15 +38,15 @@ def test_installer_streams_stdin_not_arguments(tmp_path):
     assert stdin.read_text() == "fake-secret"
     assert result.stdout == ""
     assert result.stderr.splitlines() == [
-        "Paste the token, then press Enter and Ctrl-D (input is hidden).",
-        "token installed",
+        f"Paste the {noun}, then press Enter and Ctrl-D (input is hidden).",
+        f"{noun} installed",
     ]
     assert "fake-secret" not in args.read_text() + result.stdout + result.stderr
     assert "preview-hub" in args.read_text()
     assert "chmod 0400" in args.read_text()
     assert 'chown "$2"' in args.read_text()
     result = subprocess.run(
-        [str(ROOT / "scripts/bot-token"), "--check"],
+        [str(ROOT / "scripts" / script), "--check"],
         input="not-consumed",
         text=True,
         capture_output=True,
@@ -52,8 +55,8 @@ def test_installer_streams_stdin_not_arguments(tmp_path):
     )
     assert result.returncode == 0
     assert stdin.read_text() == ""
-    assert "Paste the token" not in result.stderr
-    assert "token installed" not in result.stderr
+    assert f"Paste the {noun}" not in result.stderr
+    assert f"{noun} installed" not in result.stderr
 
 
 def test_installer_rejects_token_argument():
