@@ -23,7 +23,7 @@
 
 | Artifact | Status | Evidence / reason |
 |---|---|---|
-| Context map | REQUIRED | Hub, runtime host, GitHub, example service repositories and the future ai-qa consumer are separate authorities. |
+| Context map | REQUIRED | Hub, runtime host, GitHub, example service repositories, the polling bot and the future ai-qa consumer are separate authorities. |
 | Domain model | REQUIRED | Environment aggregate, manifest/composition value objects and the runner/git boundaries. |
 | Current schema | N/A | Greenfield: no existing schema or registry to observe. |
 | Target schema | REQUIRED | Environment registry (SQLite) owned by the hub. |
@@ -55,10 +55,13 @@ Supplementary (part of the reviewed set): `11-interface-contracts.md` — servic
 - P8 Build-time inputs never depend on other services; cross-service values (URLs, DB URL) are injected at container start. Frontends read them at runtime (entrypoint writes a config script).
 - P9 Example stacks: backend FastAPI + SQLAlchemy/Alembic + PostgreSQL 16; frontend Vite + React served by a small static server with runtime config; third service (S2) `notifier`, a small FastAPI API that the backend calls when `NOTIFIER_URL` is set.
 
+- P10 (revision 3, user decision 2026-09-29 option A) PR comment bot is a long-lived container `phub-bot` in the `preview-hub` VM. Every 20 s (configurable) it lists new PR issue comments of every repository in the catalog via the GitHub REST API (`GET /repos/{repo}/issues/comments?since=`), parses `/preview` commands (C6), authorizes them, runs the hub CLI inside `phub-hub` (`docker exec`, the bot never touches Docker otherwise — it only has the Docker socket to exec into phub-hub), and replies with one comment. It also lists closed PRs and runs `down` for their environments. The repository set comes from the catalog, so adding a service adds its repository to the bot with no bot change. Authentication: a user-created fine-grained token (catalog repositories only; Pull requests read, Issues read/write, Contents read) stored as a Docker secret inside the VM; never the owner's broad gh login token.
+- P11 (revision 3) Security: commands only from author_association OWNER/MEMBER/COLLABORATOR; PRs whose head repository differs from the base repository (forks) are refused before any build; a command runs only for a PR in a catalog repository; the service at the PR head is pinned to the exact head SHA read from the PR at command time.
+
 ## Open questions
 
 - O1 (resolved by P5) Exposure is an SSH local forward. Optional later: a Tailscale container inside the VM joined as its own tailnet node, which needs an auth key issued by the user; it would change only the public URL template (C2), not any other contract.
-- O2 PR bot authentication for a user account (not an organization): runners are per repository, so either one runner registration per example repository on the same host or a reusable workflow. Decided when S3 is planned; does not affect S1.
+- O2 (resolved in revision 3 by P10) PR bot = polling bot container; no GitHub Actions runners and no inbound connectivity.
 
 - O3 Source access on the runtime host: the host's gh is logged in to a company account. Proposed: the example repositories are public, so `git ls-remote`/fetch need no credentials; if a private repository is ever added, a cafitac fine-grained read-only token is stored for the hub only. Decided before U-RUN; does not change contracts.
 
@@ -76,3 +79,4 @@ Supplementary (part of the reviewed set): `11-interface-contracts.md` — servic
 - `python3 skills/feature-design/scripts/validate_design.py --record ../feature.md` (agent-skills 0a40840): valid, no errors or warnings; digest recorded in the feature record.
 - `npx -p @dbml/cli dbml2sql 04-target-schema.dbml --postgres` (@dbml/cli 10.2.0): parsed, 4 tables generated. The partial unique index is created by migration SQL (SQLite), as noted in the schema.
 - PlantUML renderer: not installed on this machine; `02`, `05`, `06` were not rendered. Their content is mirrored in the Mermaid review pack.
+- Revision 3 (2026-09-29): P10/P11 polling bot; schema adds `bot_comments` and `bot_cursors` (rev 2 of the registry); flow adds the bot command sequence; C6 extended with reply format, deduplication and PR-close handling.

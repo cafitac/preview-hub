@@ -22,11 +22,12 @@
 flowchart LR
     U["사용자(MacBook)<br/>phub 래퍼 → ssh → docker exec"] --> HUB
     B["브라우저(MacBook)<br/>ssh -L 18080 → *.localhost:18080"] --> PX
-    PR["PR 코멘트 (S3)"] --> BOT
+    PR["PR 코멘트 /preview (S3)"]
+    BOT -->|"20초마다 조회(나가는 연결만)"| PR
     subgraph MS["Mac Studio (호스트에는 Colima VM만)"]
         subgraph VM["Colima 프로필 preview-hub · 전용 Docker · 모두 컨테이너"]
             HUB["hub 컨테이너 phub-hub (제안 PROPOSED)<br/>카탈로그 · 조합 · 생명주기<br/>레지스트리 볼륨(SQLite)"]
-            BOT["봇 runner 컨테이너 (S3)"]
+            BOT["phub-bot 컨테이너 (S3)<br/>폴링 · 권한 검사 · 1회 실행"]
             PX["공용 프록시 phub-proxy<br/>18080 → 호스트 127.0.0.1"]
             subgraph E1["환경 feat-x"]
                 FE1["frontend@a1b2"]
@@ -180,6 +181,33 @@ flowchart TB
 
 세 번째 서비스(notifier)를 붙일 때 바뀌는 것은 **그 저장소의 `preview.yaml`과 카탈로그 한 줄**뿐이다. 백엔드는 `requires: notifier (optional)`로 선언해 두어, notifier가 없는 환경에서도 그대로 뜬다.
 
+### PR 코멘트 봇 흐름 (rev3)
+
+근거: `05-transaction-flows.puml`(bot 페이지), `07-consistency-migration.md`, `11-interface-contracts.md` C6
+
+```mermaid
+sequenceDiagram
+    participant B as phub-bot(폴링)
+    participant G as GitHub API
+    participant D as 레지스트리(bot 테이블)
+    participant H as phub-hub(docker exec)
+    loop 20초마다, 카탈로그 저장소마다
+        B->>G: 새 PR 코멘트 조회(since 커서 - 60초)
+        B->>D: 코멘트 ID 기록(이미 있으면 건너뜀 = 한 번만 실행)
+        B->>G: PR 정보(head SHA, 포크 여부, 상태)
+        alt 협력자 아님 · 포크 PR · 닫힌 PR · 문법 오류
+            B->>G: 거절 답글
+        else 허용
+            B->>H: phub up pr-backend-12 --set backend=<head SHA>
+            H-->>B: 결과(상태·주소·고정 커밋)
+            B->>G: 답글 1개
+        end
+        B->>G: 닫힌 PR 조회 → 해당 환경 down
+    end
+```
+
+봇은 GitHub으로 **나가는 연결만** 쓰므로 호스트·네트워크 설정을 바꾸지 않는다. 저장소 목록은 카탈로그에서 가져오니, 서비스를 추가하면 봇도 자동으로 그 저장소를 본다. 토큰은 사용자가 만든 fine-grained 토큰을 VM 안 Docker secret으로만 둔다.
+
 ## 전달 계획 참고 (보조 정보)
 
 | 순서 | PR 단위(가칭) | 담당 설계 범위 | 검증 / 관찰 | 롤백 경계 |
@@ -189,10 +217,11 @@ flowchart TB
 | 3 | U-CORE hub 계약·레지스트리·생명주기 | C2~C5, 스키마, 상태 흐름, FakeRunner | 단위 테스트 A1 A4 A5 A7 | 저장소 단위 |
 | 4 | U-RUN ComposeRunner·프록시·hub 컨테이너·Colima 프로필 | 격리, 라벨 정리, SSH 포워딩 접속 | Mac Studio E2E A1~A5 | `phub down` + 프로필 삭제 |
 | 5 | U-N notifier (S2) | 확장성 | E2E A6, hub diff 0 | 카탈로그 한 줄 제거 |
-| 6 | U-BOT PR 봇 (S3) | C6 | 실제 PR A9 | 워크플로 제거 |
+| 6 | U8 봇 · U9 실제 PR E2E (S3) | C6, bot 테이블, 폴링·권한·중복 방지 | 단위 테스트 + 실제 PR A9 | 봇 컨테이너 중지, 마이그레이션 0002는 추가만 |
 | 7 | U-QA 기술서·리포트 스키마 (S4) | C7 C8 | 스키마 테스트 A8 | 저장소 단위 |
 
 ## 확인이 필요한 결정
 
 - 이 설계(호스트에는 Colima VM만·나머지 전부 컨테이너, VM 안 볼륨의 SQLite 레지스트리, 커밋 고정·시작 시 주입, 라벨 기반 정리, `*.localhost` 이름 + SSH 포트 포워딩, 계약 C1~C8)를 승인하고 자율 진행 범위(스프린트 매니페스트) 작성으로 넘어갈지, 수정할지, 멈출지.
+- rev3: O2(PR 봇 연결 방식)를 폴링 봇으로 확정했다(사용자 선택 A). 봇용 fine-grained 토큰은 사용자가 만들어 VM 안 secret으로 넣는다.
 - O1(접속 방법)은 SSH 포트 포워딩으로 확정했다. Tailscale 컨테이너는 필요할 때 추가하며 공개 주소 템플릿만 바뀐다. O2(개인 계정 PR 봇 러너 등록)는 S3 계획 때 정한다.

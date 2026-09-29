@@ -91,4 +91,41 @@ note over Caller, Docker
   select READY|FAILED where ttl_expires_at < now -> DeleteEnvironment per env (skip if lock busy).
   Stale RUNNING operation (pid gone, heartbeat older than 10 min) -> INTERRUPTED, env -> FAILED.
 end note
+
+newpage preview-hub v1 — PR comment bot (phub-bot, revision 3)
+
+participant "phub-bot (poll loop)" as Bot
+participant "GitHubApi" as GH
+database "Registry (SQLite, bot tables)" as DB
+participant "phub-hub (docker exec phub ...)" as Hub
+
+loop every 20 s, per catalog repository
+  Bot -> GH: GET issues/comments?since=<cursor - 60 s>
+  loop each comment on a PR starting with /preview
+    group SQLite txn
+      Bot -> DB: INSERT bot_comments(comment_id, ..., RECEIVED)
+      note right: primary-key conflict = already handled -> skip
+    end
+    Bot -> GH: GET pull (head.repo, head.sha, base.repo, state)
+    alt author not OWNER/MEMBER/COLLABORATOR, fork PR, closed PR, or parse error
+      Bot -> DB: status=REJECTED, error
+      Bot -> GH: POST reply (reason)
+    else authorized
+      Bot -> DB: status=RUNNING, environment=pr-<service>-<number>
+      Bot -> Hub: phub up|update|status|down <env> --set <service>=<head.sha> [other svc=ref] --format json
+      Hub --> Bot: result JSON / exit code
+      Bot -> DB: status=DONE|FAILED
+      Bot -> GH: POST single reply (state, URLs, pinned commits or failure stage)
+      Bot -> DB: reply_comment_id
+    end
+  end
+  Bot -> DB: advance cursor to newest comment updated_at
+  Bot -> GH: GET pulls?state=closed&sort=updated since closed_checked_at
+  Bot -> Hub: phub down pr-<service>-<number> for each closed PR with an environment
+end
+note over Bot, Hub
+  A crash between RUNNING and DONE: on restart, RUNNING rows older than 10 min are marked FAILED and
+  get a reply "interrupted, run the command again"; the hub's own stale-operation recovery handles the environment.
+  Reply posting failures are retried on the next loop while reply_comment_id is NULL (at most 3 attempts).
+end note
 @enduml

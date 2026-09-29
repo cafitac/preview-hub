@@ -9,7 +9,7 @@
 - Repository: cafitac/preview-hub (new; companion repos cafitac/preview-example-backend, cafitac/preview-example-frontend)
 - Created: 2026-09-29
 - Updated: 2026-09-29
-- Current slice: S2 extensibility + ai-qa descriptor (sprint 20260930-s2-v1)
+- Current slice: S3 PR comment bot (sprint 20260930-s3-v1)
 - Current PR unit: CONTROL
 - Delivery strategy: STANDALONE
 - Current delivery bundle: N/A
@@ -28,21 +28,21 @@
 - Failure/recovery owner map: create/update/delete failures owned by hub lifecycle; partial-create cleanup by runner (design input)
 - Cleanup inventory map: per-environment Compose project, network, volumes, DB, proxy route, built images, workspace checkouts (design input)
 - Parent control record: N/A (this record is the sprint control record)
-- Sprint ID: 20260930-s2-v1
-- Sprint manifest: /Users/reddit/Project/cafitac/preview-hub/.dev/features/20260929-preview-hub-v1/sprints/20260930-s2-v1.md
-- Sprint manifest SHA-256: 800dc41c4792b3c5d7e0c01406fa44b8155770f4972fe3e034053f74babbe8ff
-- Authority grant: manifest 20260930-s2-v1 authority matrix + REPO_BOOTSTRAP + RUNTIME_HOST_SETUP + E2E_FIXTURES + MERGE (D7), confirmed by the user 2026-09-29
-- Approved delivery scope: U5–U7 per manifest 20260930-s2-v1; merge by main task under D7
+- Sprint ID: 20260930-s3-v1
+- Sprint manifest: /Users/reddit/Project/cafitac/preview-hub/.dev/features/20260929-preview-hub-v1/sprints/20260930-s3-v1.md
+- Sprint manifest SHA-256: ea1d996218f502805520967ea295895b25fa7d77e38840a0ef9a80fc303718a0
+- Authority grant: manifest 20260930-s3-v1 authority matrix + RUNTIME_HOST_SETUP + LIVE_PR_E2E + E2E_FIXTURES + MERGE (D7), confirmed by the user 2026-09-29
+- Approved delivery scope: U8–U9 per manifest 20260930-s3-v1; merge by main task under D7
 - Delivery finalization: AUTO_AFTER_GATES
-- Delivery finalization scope: U5, U6, U7 PRs in cafitac/preview-example-notifier, cafitac/preview-example-backend, cafitac/preview-hub (main)
-- Delivery finalization evidence: user confirmation 2026-09-29 "응 이 범위로 확정하고 시작해줘" for manifest digest 800dc41c4792b3c5d7e0c01406fa44b8155770f4972fe3e034053f74babbe8ff
-- Eligible unit IDs: U5, U6, U7
+- Delivery finalization scope: U8, U9 PRs in cafitac/preview-hub (main)
+- Delivery finalization evidence: user confirmation 2026-09-29 "응 이 범위로 확정하고 시작해줘" for manifest digest ea1d996218f502805520967ea295895b25fa7d77e38840a0ef9a80fc303718a0
+- Eligible unit IDs: U8, U9
 - Review topology: CODE_POLISH_QUORUM
 - Review quorum: 2
 - Review scheduling: PARALLEL
 - Review cycle budget: 5
-- Unit review topology map: U5=INHERIT, U6=INHERIT, U7=INHERIT
-- Unit review cycle budget map: U5=INHERIT, U6=INHERIT, U7=INHERIT
+- Unit review topology map: U8=INHERIT, U9=INHERIT
+- Unit review cycle budget map: U8=INHERIT, U9=INHERIT
 - Single-reviewer exception scope: N/A
 - Single-reviewer exception rationale: N/A
 - Single-reviewer exception approval: N/A
@@ -64,8 +64,8 @@
 - Design profile: STANDARD
 - Design status: APPROVED
 - Design root: /Users/reddit/Project/cafitac/preview-hub/.dev/features/20260929-preview-hub-v1/design
-- Design approval: revision 2 APPROVED by user 2026-09-29 ("승인하고 계속 진행해줘") for digest 54b3d04db0dbab5bc42a20ddb2042601c86f8c3e701b18d8c199e67461ef98a2; revision 1 (75c46b73…) superseded
-- Design evidence identity: artifact_set_sha256 54b3d04db0dbab5bc42a20ddb2042601c86f8c3e701b18d8c199e67461ef98a2 (revision 2, all-containerized runtime; 10 artifacts: 00,01,02,04,05,06,07,08,09,11)
+- Design approval: revision 3 APPROVED by user 2026-09-29 ("승인하고 계속 진행해줘") for digest 084565e1635122f4f8db354bd59709eebedd74bd4829bf023be8de054dd2581f; revisions 1–2 superseded
+- Design evidence identity: artifact_set_sha256 084565e1635122f4f8db354bd59709eebedd74bd4829bf023be8de054dd2581f (revision 3, polling PR bot)
 - Service boundary E2E: RUNTIME_HOST_E2E (two example services + DB on trading-macstudio)
 - Service boundary waiver: N/A
 - Repository-wide checks: to be defined at repository creation (ruff, pyright/mypy, pytest for hub)
@@ -74,7 +74,7 @@
 
 - Workflow stage: FEATURE_PLAN
 - Last completed stage: FEATURE_PLAN
-- Next eligible action: AGENT_SQUAD (start sprint 20260929-s1-v2)
+- Next eligible action: FEATURE_PLAN
 - Next action class: LOCAL_CONTINUE
 - Gate state: NONE
 - Gate reason:
@@ -84,24 +84,24 @@
 ## Autonomous sprint
 
 - Sprint state: SPRINT_COMPLETE
-- Manifest version: 1 (S2)
-- Manifest confirmation: user, 2026-09-29, "응 이 범위로 확정하고 시작해줘", digest 800dc41c4792b3c5d7e0c01406fa44b8155770f4972fe3e034053f74babbe8ff re-hashed unchanged
-- Planning base SHA: preview-example-backend 885a373810a81e1db3972c11955d717a99b94a10; preview-hub 11d0aa87a9dfeb66582528e5d7cce2f4cd3c5296; notifier at bootstrap
+- Manifest version: 1 (S3)
+- Manifest confirmation: user, 2026-09-29, "응 이 범위로 확정하고 시작해줘", digest ea1d996218f502805520967ea295895b25fa7d77e38840a0ef9a80fc303718a0 re-hashed unchanged
+- Planning base SHA: preview-hub ed54eed49aa708a59609f6ed7a1ddae6e6417a05; preview-example-backend 544fd35e612f9751547e650f50ab0a5f1d5b1567
 - Base drift policy: ALLOW_IF_DISJOINT
-- Execution base SHA: notifier 7ab7aa87caeb707e6847e9826fbfbe9876fa4cc6 (bootstrap); backend 885a373810a81e1db3972c11955d717a99b94a10; preview-hub 11d0aa87a9dfeb66582528e5d7cce2f4cd3c5296
-- Started: 2026-09-29 (S2)
+- Execution base SHA: preview-hub ed54eed49aa708a59609f6ed7a1ddae6e6417a05
+- Started: 2026-09-29 (S3)
 - Expires: 2026-10-06 23:59 KST
 - Desired finish state: READY_FOR_USER_MERGE
 - Learning mode: PROPOSE
 - Eligible unit IDs: U1, U2, U3, U4
-- WIP / unit / repair / retry budgets: WIP 2 / units 3 / repair 2 (+3 runtime) per unit / CI retry 2 (consumed: 0)
+- WIP / unit / repair / retry budgets: WIP 1 / units 2 / repair 2 (+3 runtime) per unit / CI retry 2 (consumed: 0)
 - Setup reservations: none (converted to claims)
 - Active PR units: none
-- Remaining eligible units: U5=MERGED bd5faec3, U6=MERGED 544fd35e, U7=MERGED fe3f5cbb
+- Remaining eligible units: U8=MERGED bce97aa2, U9=MERGED de6c5e03
 - Authority matrix: see manifest
-- Selection rule: U5 and U6 in parallel; U7 after both merges are read back
+- Selection rule: U8 then U9
 - Stop and escalation: see manifest
-- Boundary decision: S2 complete 2026-09-29; core value 2 proven (A6) and descriptor validated (A8); next: S3 PR comment bot needs planning (open O2)
+- Boundary decision: S3 complete 2026-09-29; PR comment bot proven live (A9); next: design revision 4 and S4 plan per D10 (no paid services)
 
 ## Outcome
 
@@ -245,6 +245,20 @@ One command (CLI, later a PR comment) creates an isolated environment that runs 
 - Normalized value: U3 review cycle budget raised from 5 to 7 (U3 only); the 2-of-2 clean quorum gate is unchanged.
 - Confirmed at: 2026-09-29
 
+### D9: U8 review cycle budget extension
+
+- Status: CONFIRMED
+- User answer: "승인할게 진행해줘" (2026-09-29) to the budget-exhaustion packet whose recommended option 1 was extending U8
+- Normalized value: U8 review cycle budget raised from 5 to 7 (U8 only); 2-of-2 clean quorum unchanged.
+- Confirmed at: 2026-09-29
+
+### D10: S4 direction — central dashboard and public access
+
+- Status: CONFIRMED
+- User answer (2026-09-29): central management for matching specific frontend/backend versions; publish at preview-hub.cafitac.com; domain on Cloudflare DNS; access control by Cloudflare Access; finish S3 first, then design revision 4 and plan S4.
+- Normalized value: S4 scope proposal — hub web dashboard (environment list, compose by picking main/branch/open PR per service, PR cross-linking comments), `svc=pr-<n>` ref syntax, public exposure through a cloudflared container inside the VM (outbound-only) with `preview-hub.cafitac.com` (dashboard) and `*.preview.cafitac.com` (environments) behind Cloudflare Access. Requires design revision 4 (security/isolation model changes) and user-created Cloudflare tunnel credentials.
+- Confirmed at: 2026-09-29
+
 ## Open questions
 
 - None blocking planning. Design inputs listed under Design contract.
@@ -270,3 +284,13 @@ One command (CLI, later a PR comment) creates an isolated environment that runs 
 - 2026-09-29: Cause found: the MacBook Codex login changed at 14:25; after the user reconnected an account (14:29) a minimal probe with gpt-6-astra returned OK. Route unchanged. Sprint resumed. (Mac Studio Codex token is invalidated — user re-login pending; not needed for this sprint's local workers.)
 - 2026-09-29: U5 merged (bd5faec3); U5 and U6 merges read back; U7 reserved and claimed.
 - 2026-09-29: SPRINT_COMPLETE for 20260930-s2-v1: U5–U7 merged; E2E A1–A6 + A8 green on trading-macstudio; hub/schemas code unchanged by S2. Review cycles: U5 3, U6 1, U7 3. One pause: Codex worker lane unavailable after a login change (resolved by the user).
+- 2026-09-29: User chose option A (polling bot) for S3; design set to REVISE for revision 3 (O2 resolution). Revision 2 digest 54b3d04d… preserved in history.
+- 2026-09-29: Design revision 3 (polling PR bot, bot tables, security rules) validated; DBML parsed (6 tables). Awaiting approval for digest 084565e1635122f4f8db354bd59709eebedd74bd4829bf023be8de054dd2581f.
+- 2026-09-29: Design revision 3 approved (digest 084565e1…, revalidated unchanged).
+- 2026-09-29: S3 manifest 20260930-s3-v1 confirmed (digest ea1d996218f502805520967ea295895b25fa7d77e38840a0ef9a80fc303718a0); SPRINT_RUNNING; U8 reserved.
+- 2026-09-29: U8 exhausted review budget 5 (cycle 5: 1 finding, stale retry_at); user extended U8 to 7 (D9).
+- 2026-09-29: U8 merged (bce97aa2); U9 waits for the user to create and install the bot token.
+- 2026-09-29: User installed the bot token (presence checked only; a probe from the bot container printed only HTTP status 200s). An initial partial install left the running bot in a stale failure state until a container restart; fix scoped into U9. U9 reserved and claimed.
+- 2026-09-29: User set S4 direction (D10): central dashboard + public access via Cloudflare Tunnel/Access on cafitac.com, after S3 completes.
+- 2026-09-29: U9 merged (de6c5e03) after live A9 and regression E2E on f9e24b2. SPRINT_COMPLETE for 20260930-s3-v1.
+- 2026-09-29: D10 constraint (user): no paid Cloudflare features. Public hostnames must stay one level under cafitac.com so the free Universal SSL wildcard covers them (dashboard preview-hub.cafitac.com; environments flattened, e.g. app--pr-backend-4.cafitac.com). Existing pattern to reuse: named tunnel + config.yml ingress + cloudflared container on the app network (judge-board), but credentials inside the VM (/opt/phub/secrets), not on the host.
