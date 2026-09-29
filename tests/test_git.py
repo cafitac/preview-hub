@@ -130,6 +130,12 @@ def test_hex_named_refs_take_precedence_over_commit_prefixes(
 
 
 class FakeGitHub:
+    def get_authenticated_user(self):
+        return "bot"
+
+    def list_pr_comments(self, repo, number):
+        return []
+
     def __init__(self):
         self.pr = {
             "state": "open",

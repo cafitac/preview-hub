@@ -18,6 +18,7 @@ from preview_hub.registry import Registry
 from .commands import Command, authorize, environment_name, parse_command, repository
 from .executor import Executor, Result, format_reply
 from .ledger import Ledger, overlap
+from .links import LinkReconciler
 
 LOG = logging.getLogger(__name__)
 
@@ -36,6 +37,9 @@ class PollingBot:
         self.api = api
         self.executor = executor
         self.ledger = ledger
+        public_access = getattr(catalog, "public_access", None)
+        entry_service = getattr(public_access, "entry_service", "frontend")
+        self.links = LinkReconciler(ledger.registry, api, entry_service)
         self.clock = clock
         self.started_at = clock().astimezone(UTC).isoformat()
         self.comment_floors: dict[str, datetime] = {}
@@ -323,6 +327,10 @@ class PollingBot:
                 # Exception text may contain credentials or response bodies.
                 LOG.warning("Repository poll failed: repo=%s", repo)
         self.replies()
+        try:
+            self.links.reconcile()
+        except Exception:  # noqa: BLE001 - keep polling without logging API data
+            LOG.warning("Cross-link reconcile failed")
 
 
 def parse_interval(value: str) -> float:
