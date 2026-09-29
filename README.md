@@ -216,3 +216,54 @@ The sample is synthetic contract data, not evidence of a live QA run.
 The exit trap deletes all six possible environment names and checks their
 label inventories are empty. Live A6/A8 require the networked runtime host;
 `pytest` validates both contracts without Docker.
+
+## PR bot
+
+The `phub-bot` container polls catalog repositories every 20 seconds. Set
+`PHUB_BOT_INTERVAL` to a finite positive number of seconds to change it.
+It needs no webhook or inbound port.
+
+Create a **fine-grained personal access token** limited to the catalog repositories,
+with **Pull requests: read**, **Issues: read/write**, and **Contents: read**.
+Do not use the host's broad `gh` login token. From the MacBook, pipe the token from
+its secure source into `scripts/bot-token` (never put the value in an argument),
+or run `scripts/bot-token`, paste it at the hidden stdin prompt, and press Ctrl-D.
+Run `scripts/bot-token --check` to check presence without reading its contents.
+The installer uses `PHUB_SSH_HOST`, `PHUB_SSH_OPTS`, and `PHUB_REMOTE_PATH` like
+`scripts/phub`, and writes only inside the `preview-hub` VM, as root, mode 0400,
+at `/opt/phub/secrets/github_token`. Bootstrap creates `/opt/phub/secrets`
+with mode 0700 if missing; Compose mounts that directory read-only at `/run/secrets`.
+The stack starts without a token. The bot checks `/run/secrets/github_token` each
+loop; if absent or empty it logs `token missing` once and idles. Installing or
+rotating the token takes effect without restarting the container.
+
+Post one command as the entire PR comment:
+
+```text
+/preview up
+/preview up frontend=main ttl=24h
+/preview update backend=main
+/preview status
+/preview down
+```
+
+The environment is `pr-<catalog-service>-<PR-number>`. The PR's service always
+uses the exact current PR head SHA, even if its argument names another ref.
+Other services use the supplied refs or catalog defaults. `ttl` is supported
+only on `up`; `update` requires at least one `service=ref`. Replies show state,
+12-character commits and URLs, or a failure stage/rejection reason. Closing a PR
+removes its environment on a subsequent poll; failed cleanup is retried.
+
+Only OWNER, MEMBER and COLLABORATOR comments on open, same-repository PRs in the
+catalog are allowed. Forks, closed PRs and malformed commands run nothing.
+Commands execute only through `docker exec phub-hub phub`; the mounted Docker
+socket is privileged, so this is a code restriction, not daemon-enforced isolation.
+The bot never includes the token in command arguments, logs, replies or its repr.
+A durable comment-ID ledger prevents re-execution across overlapping polls and
+restarts. Interrupted commands become FAILED after ten minutes and need a new
+comment. Unsent replies have at most three delivery attempts per process lifetime;
+a restart resets the in-memory count and retry delay. GitHub POST
+acknowledgement loss can still cause a duplicate reply, since GitHub provides no
+idempotency key for issue comments. Retries rebuild replies from the stored bot comment status, environment and error,
+plus a fresh `phub status <env> --format json` when an environment exists.
+Bot data is stored only in the revision-2 bot tables, never in schema metadata.

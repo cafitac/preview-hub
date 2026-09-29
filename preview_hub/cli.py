@@ -134,6 +134,7 @@ def create_context() -> Context:
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(prog="phub")
     commands = root.add_subparsers(dest="command", required=True)
+    commands.add_parser("bot")
     serve = commands.add_parser("serve")
     serve.add_argument(
         "--interval",
@@ -168,6 +169,11 @@ def parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None, context: Context | None = None) -> int:
     args = parser().parse_args(argv)
     try:
+        if args.command == "bot":
+            from .bot.polling import serve
+
+            serve()
+            return 0
         if args.command == "serve":
             if args.interval is None:
                 args.interval = float(os.environ.get("PHUB_GC_INTERVAL", "900"))
