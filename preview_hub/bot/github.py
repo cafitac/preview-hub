@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import time
 from collections.abc import Callable
@@ -137,6 +138,10 @@ class UrllibGitHubApi:
                         )
                     )
                 )
+                if exc.code == 401 or (exc.code == 403 and not retry):
+                    logging.getLogger(__name__).warning(
+                        "authentication failed: repo=%s", "/".join(path.split("/")[2:4])
+                    )
                 retry_after = exc.headers.get("Retry-After")
                 if retry_after:
                     try:

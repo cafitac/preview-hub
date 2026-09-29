@@ -33,6 +33,11 @@ def test_installer_streams_stdin_not_arguments(tmp_path):
     )
     assert result.returncode == 0
     assert stdin.read_text() == "fake-secret"
+    assert result.stdout == ""
+    assert result.stderr.splitlines() == [
+        "Paste the token, then press Enter and Ctrl-D (input is hidden).",
+        "token installed",
+    ]
     assert "fake-secret" not in args.read_text() + result.stdout + result.stderr
     assert "preview-hub" in args.read_text()
     assert "chmod 0400" in args.read_text()
@@ -47,6 +52,8 @@ def test_installer_streams_stdin_not_arguments(tmp_path):
     )
     assert result.returncode == 0
     assert stdin.read_text() == ""
+    assert "Paste the token" not in result.stderr
+    assert "token installed" not in result.stderr
 
 
 def test_installer_rejects_token_argument():
@@ -154,3 +161,20 @@ def test_setup_ownership_commands(tmp_path, uid_gid, script):
     if script == "bot-token":
         assert f"chown <{owner}> <{directory}/.github_token." in commands
         assert f"chmod <0400> <{directory}/.github_token." in commands
+
+
+def test_installer_failure_does_not_report_success(tmp_path):
+    fake = tmp_path / "ssh"
+    fake.write_text("#!/bin/sh\nexit 1\n")
+    fake.chmod(0o755)
+    result = subprocess.run(
+        [str(ROOT / "scripts/bot-token")],
+        input="fake-secret",
+        text=True,
+        capture_output=True,
+        env={**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}"},
+        check=False,
+    )
+    assert result.returncode == 1
+    assert "token installed" not in result.stderr
+    assert "fake-secret" not in result.stdout + result.stderr
