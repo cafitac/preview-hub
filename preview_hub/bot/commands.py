@@ -78,5 +78,11 @@ def environment_name(service: str, number: int) -> str:
 
 
 def repository(pr: dict[str, Any], side: str) -> str | None:
-    repo = cast(dict[str, Any], pr.get(side, {}).get("repo") or {})
-    return repo.get("full_name")
+    branch = pr.get(side)
+    if not isinstance(branch, dict):
+        return None
+    repo = cast(dict[str, Any], branch).get("repo")
+    if not isinstance(repo, dict):
+        return None
+    name = cast(dict[str, Any], repo).get("full_name")
+    return name if isinstance(name, str) else None

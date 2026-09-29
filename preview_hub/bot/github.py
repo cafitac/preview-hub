@@ -17,10 +17,18 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 class GitHubError(RuntimeError):
     """Deliberately excludes response bodies, request objects and credentials."""
 
-    def __init__(self, message: str, *, retry_at: float = 0, attempted: bool = True):
+    def __init__(
+        self,
+        message: str,
+        *,
+        retry_at: float = 0,
+        attempted: bool = True,
+        retryable: bool = False,
+    ):
         super().__init__(message)
         self.retry_at = retry_at
         self.attempted = attempted
+        self.retryable = retryable
 
 
 class TokenMissing(GitHubError):
@@ -153,9 +161,11 @@ class UrllibGitHubApi:
                     if retry:
                         self.retry_at = time.time() + delay
                     raise GitHubError(
-                        "GitHub request failed", retry_at=self.retry_at
+                        "GitHub request failed", retry_at=self.retry_at, retryable=retry
                     ) from None
-            except (OSError, ValueError, TypeError, HTTPException):
+            except (OSError, HTTPException):
+                raise GitHubError("GitHub request failed", retryable=True) from None
+            except (ValueError, TypeError):
                 raise GitHubError("GitHub request failed") from None
             self.sleep(delay)
         raise GitHubError("GitHub request failed")

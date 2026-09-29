@@ -8,7 +8,7 @@ import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from preview_hub.contracts import Catalog, InvalidInput, load_yaml
 from preview_hub.registry import Registry
@@ -37,7 +37,9 @@ class PollingBot:
         self.ledger = ledger
         self.clock = clock
         self.started_at = clock().astimezone(UTC).isoformat()
-        self.comment_floors: dict[str, datetime] = {}
+        self.comment_floors: dict[str, datetime | None] = {}
+        self.closed_retries: dict[str, set[str]] = {}
+        self.closed_retry_limit = 1000
 
     def handle(self, repo: str, comment: dict[str, Any]) -> None:
         body = str(comment.get("body") or "").strip()
@@ -60,13 +62,28 @@ class PollingBot:
             command = parse_command(body, self.catalog)
         except InvalidInput as exc:
             parse_error = str(exc)
-        # Parsing is pure; claim the ID before any API call or execution.
+        if self.ledger.contains(comment_id):
+            return
+        user = comment.get("user")
+        author = (
+            cast(dict[str, Any], user).get("login") if isinstance(user, dict) else None
+        )
+        pr: Any = {}
+        read_error = None
+        if command is not None and author:
+            try:
+                pr = self.api.get_pr(repo, number)
+            except GitHubError as exc:
+                if not exc.attempted or exc.retry_at or exc.retryable:
+                    raise
+                read_error = exc
+        # Claim only after PR reads can be evaluated; execution remains deduplicated.
         # Do not retain arbitrary malformed bodies in the ledger or logs.
         if not self.ledger.receive(
             comment_id,
             repo,
             number,
-            str(comment.get("user", {}).get("login", "")),
+            str(author or ""),
             command.normalized() if command else "/preview",
             self.clock().isoformat(),
         ):
@@ -84,7 +101,13 @@ class PollingBot:
             if command is None:
                 raise InvalidInput(parse_error)
             action = command.action
-            pr = self.api.get_pr(repo, number)
+            if not isinstance(author, str) or not author:
+                raise InvalidInput("Comment author is missing")
+            if read_error is not None:
+                raise read_error
+            if not isinstance(pr, dict):
+                raise InvalidInput("Invalid PR")
+            pr = cast(dict[str, Any], pr)
             service = authorize(
                 self.catalog, repo, str(comment.get("author_association", "")), pr
             )
@@ -188,33 +211,77 @@ class PollingBot:
                 self.ledger.replied(row["comment_id"], reply_id)
                 self.ledger.initial_replies.pop(row["comment_id"], None)
 
+    def cleanup(self, repo: str, name: str) -> None:
+        retries = self.closed_retries.setdefault(repo, set())
+        try:
+            env = self.ledger.registry.get(name)
+            if env is None or env["state"] == "DELETED":
+                retries.discard(name)
+                return
+            result = self.executor.execute(Command("down", {}), name)
+            if result.code == 0:
+                retries.discard(name)
+                return
+        except Exception:  # noqa: BLE001 - retry without logging response data
+            LOG.warning("Closed PR cleanup failed: repo=%s environment=%s", repo, name)
+        if len(retries) < self.closed_retry_limit or name in retries:
+            retries.add(name)
+            LOG.warning(
+                "Closed PR cleanup pending retry: repo=%s environment=%s", repo, name
+            )
+        else:
+            LOG.warning("Closed PR retry set full: repo=%s environment=%s", repo, name)
+
     def poll(self) -> None:
         self.recover()
         for repo in sorted({entry.repo for entry in self.catalog.services.values()}):
             try:
+                if repo not in self.comment_floors:
+                    self.comment_floors[repo] = (
+                        None
+                        if self.ledger.has_cursor(repo)
+                        else datetime.fromisoformat(self.started_at)
+                    )
                 comments_since, closed_since = self.ledger.cursor(repo, self.started_at)
-                floor = self.comment_floors.setdefault(
-                    repo, datetime.fromisoformat(comments_since)
-                )
+                attempted = set(self.closed_retries.get(repo, set()))
+                for name in sorted(attempted):
+                    self.cleanup(repo, name)
+                floor = self.comment_floors[repo]
                 try:
                     comments = self.api.list_issue_comments(
                         repo, overlap(comments_since)
                     )
                     newest = datetime.fromisoformat(comments_since)
                     for comment in sorted(
-                        comments, key=lambda row: (row["updated_at"], row["id"])
+                        comments,
+                        key=lambda row: (
+                            str(row.get("updated_at") or ""),
+                            row["id"] if isinstance(row.get("id"), int) else 0,
+                        ),
                     ):
-                        # The API overlap may return history, including edited old comments.
-                        created = comment.get("created_at", comment["updated_at"])
-                        if datetime.fromisoformat(created) < floor:
-                            continue
-                        self.handle(repo, comment)
-                        newest = max(
-                            newest, datetime.fromisoformat(comment["updated_at"])
-                        )
+                        try:
+                            created = comment.get("created_at") or comment["updated_at"]
+                            if (
+                                floor is not None
+                                and datetime.fromisoformat(created) < floor
+                            ):
+                                continue
+                            self.handle(repo, comment)
+                        except GitHubError:
+                            # No claim was made: leave the entire cursor unchanged.
+                            raise
+                        except Exception:  # noqa: BLE001 - isolate malformed comments
+                            LOG.warning("Comment handling failed: repo=%s", repo)
+                        try:
+                            newest = max(
+                                newest, datetime.fromisoformat(comment["updated_at"])
+                            )
+                        except (KeyError, TypeError, ValueError):
+                            LOG.warning("Invalid comment timestamp: repo=%s", repo)
                     self.ledger.advance(repo, comments=newest.isoformat())
                 except GitHubError:
-                    LOG.warning("Comment poll failed: repo=%s", repo)
+                    LOG.warning("Comment poll deferred: repo=%s", repo)
+                    continue
                 try:
                     scan_started = self.clock().isoformat()
                     closed = self.api.list_closed_prs(repo, overlap(closed_since))
@@ -225,20 +292,21 @@ class PollingBot:
                     ]
                     if len(services) != 1:
                         continue
-                    complete = True
                     for pr in closed:
-                        if (
-                            pr.get("state") != "closed"
-                            or repository(pr, "base") != repo
-                        ):
-                            continue
-                        name = environment_name(services[0], int(pr["number"]))
-                        env = self.ledger.registry.get(name)
-                        if env is not None and env["state"] != "DELETED":
-                            result = self.executor.execute(Command("down", {}), name)
-                            complete = complete and result.code == 0
-                    if complete:
-                        self.ledger.advance(repo, closed=scan_started)
+                        try:
+                            if (
+                                pr.get("state") != "closed"
+                                or repository(pr, "base") != repo
+                            ):
+                                LOG.warning("Invalid closed PR skipped: repo=%s", repo)
+                                continue
+                            name = environment_name(services[0], int(pr["number"]))
+                            if name not in attempted:
+                                attempted.add(name)
+                                self.cleanup(repo, name)
+                        except Exception:  # noqa: BLE001 - isolate malformed PRs
+                            LOG.warning("Invalid closed PR skipped: repo=%s", repo)
+                    self.ledger.advance(repo, closed=scan_started)
                 except (GitHubError, InvalidInput):
                     LOG.warning("Closed PR sweep failed: repo=%s", repo)
             except Exception:  # noqa: BLE001 - keep polling without leaking exception data

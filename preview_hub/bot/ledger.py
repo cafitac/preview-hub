@@ -91,11 +91,28 @@ class Ledger:
                 (reply_id, comment_id),
             )
 
+    def contains(self, comment_id: int) -> bool:
+        with self.registry.transaction() as db:
+            return (
+                db.execute(
+                    "SELECT 1 FROM bot_comments WHERE comment_id=?", (comment_id,)
+                ).fetchone()
+                is not None
+            )
+
+    def has_cursor(self, repo: str) -> bool:
+        with self.registry.transaction() as db:
+            return (
+                db.execute("SELECT 1 FROM bot_cursors WHERE repo=?", (repo,)).fetchone()
+                is not None
+            )
+
     def cursor(self, repo: str, start: str | None = None) -> tuple[str, str]:
+        start = start or datetime.now(UTC).isoformat()
         with self.registry.transaction() as db:
             db.execute(
                 "INSERT OR IGNORE INTO bot_cursors VALUES (?,?,?)",
-                (repo, start or datetime.now(UTC).isoformat(), EPOCH),
+                (repo, start, start),
             )
             row = db.execute(
                 "SELECT comments_since,closed_checked_at FROM bot_cursors WHERE repo=?",

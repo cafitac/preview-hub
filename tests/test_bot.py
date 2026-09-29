@@ -301,7 +301,7 @@ def test_reply_format_and_busy():
     )
 
 
-def test_closed_pr_sweep_retries_failure_without_advancing(rig):
+def test_closed_pr_sweep_retries_failure_after_advancing(rig):
     bot, api, runner, ledger = rig
     api.comments = []
     api.closed = [{**copy.deepcopy(PR), "state": "closed"}]
@@ -318,9 +318,12 @@ def test_closed_pr_sweep_retries_failure_without_advancing(rig):
             ),
         )
     initial = ledger.cursor(REPO, NOW.isoformat())[1]
+    assert initial == NOW.isoformat()
+    bot.clock = lambda: NOW + timedelta(minutes=2)
     runner.code = 5
     bot.poll()
-    assert ledger.cursor(REPO)[1] == initial
+    assert ledger.cursor(REPO)[1] == bot.clock().isoformat()
+    assert bot.closed_retries[REPO] == {"pr-backend-42"}
     assert runner.calls[0] == [
         "docker",
         "exec",
@@ -332,9 +335,11 @@ def test_closed_pr_sweep_retries_failure_without_advancing(rig):
         "json",
     ]
     runner.code = 0
+    api.closed = []
     bot.poll()
     assert len(runner.calls) == 2
-    assert ledger.cursor(REPO)[1] == NOW.isoformat()
+    assert not bot.closed_retries[REPO]
+    assert api.closed_polls[2][1] == overlap(bot.clock().isoformat())
 
 
 @pytest.mark.parametrize("status", ["RUNNING", "RECEIVED"])
@@ -744,3 +749,147 @@ def test_overlap_still_accepts_delayed_comments_after_initial_floor(rig):
     ]
     bot.poll()
     assert len(runner.calls) == len(api.posts) == 2
+
+
+def test_existing_cursor_accepts_late_overlap_comment_after_restart(rig, catalog):
+    bot, api, runner, ledger = rig
+    bot.poll()
+    api.comments = [
+        {
+            **api.comments[0],
+            "id": 101,
+            "created_at": (NOW - timedelta(seconds=5)).isoformat(),
+            "updated_at": (NOW - timedelta(seconds=5)).isoformat(),
+        }
+    ]
+    restarted = PollingBot(
+        catalog,
+        api,
+        Executor(runner),
+        Ledger(Registry(ledger.registry.state_dir)),
+        clock=lambda: NOW,
+    )
+    restarted.poll()
+    restarted.poll()
+    assert len(runner.calls) == len(api.posts) == 2
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        GitHubError("cooldown", attempted=False),
+        GitHubError("rate limit", retry_at=123),
+        GitHubError("temporary", retryable=True),
+    ],
+)
+def test_retryable_pr_read_leaves_batch_unclaimed_and_cursor_unchanged(rig, error):
+    bot, api, runner, ledger = rig
+    api.comments.append({**api.comments[0], "id": 101})
+    for comment in api.comments:
+        comment["updated_at"] = (NOW + timedelta(seconds=10)).isoformat()
+    reads = []
+    original = api.get_pr
+
+    def fail(repo, number):
+        reads.append(number)
+        raise error
+
+    api.get_pr = fail
+    bot.poll()
+    assert reads == [42]
+    assert not ledger.rows(("RECEIVED", "FAILED", "DONE"))
+    assert ledger.cursor(REPO)[0] == NOW.isoformat()
+    assert not runner.calls and not api.posts
+    assert not any(repo == REPO for repo, _ in api.closed_polls)
+    api.get_pr = original
+    bot.poll()
+    assert len(runner.calls) == len(api.posts) == 2
+
+
+@pytest.mark.parametrize("missing", [False, True])
+@pytest.mark.parametrize("field", ["user", "head", "head_repo", "base", "base_repo"])
+def test_nullable_author_and_pr_fields_are_rejected(rig, field, missing):
+    bot, api, runner, ledger = rig
+    if field == "user":
+        target, key = api.comments[0], "user"
+    elif field.endswith("_repo"):
+        target, key = api.pr[field.removesuffix("_repo")], "repo"
+    else:
+        target, key = api.pr, field
+    if missing:
+        target.pop(key)
+    else:
+        target[key] = None
+    bot.poll()
+    assert len(ledger.rows(("REJECTED",))) == 1
+    assert not runner.calls
+    assert any(repo == REPO for repo, _ in api.closed_polls)
+
+
+def test_unexpected_comment_error_does_not_block_batch_or_sweep(rig, caplog):
+    bot, api, runner, ledger = rig
+    bad = {**api.comments[0], "id": None}
+    api.comments = [
+        bad,
+        {
+            **api.comments[0],
+            "id": 101,
+            "updated_at": (NOW + timedelta(seconds=20)).isoformat(),
+        },
+    ]
+    with caplog.at_level(logging.WARNING):
+        bot.poll()
+    assert len(runner.calls) == 1
+    assert ledger.cursor(REPO)[0] == (NOW + timedelta(seconds=20)).isoformat()
+    assert any(repo == REPO for repo, _ in api.closed_polls)
+    assert "Comment handling failed" in caplog.text
+
+
+def test_closed_retry_set_is_bounded_and_logs_overflow(rig, caplog):
+    bot, _api, _runner, ledger = rig
+    bot.closed_retry_limit = 1
+    with ledger.registry.transaction() as db:
+        for number in (42, 43):
+            db.execute(
+                "INSERT INTO environments(name,state,spec_json,ttl_expires_at,created_at,updated_at) VALUES (?,?,?,?,?,?)",
+                (
+                    f"pr-backend-{number}",
+                    "READY",
+                    "{}",
+                    NOW.isoformat(),
+                    NOW.isoformat(),
+                    NOW.isoformat(),
+                ),
+            )
+    _runner.code = 5
+    with caplog.at_level(logging.WARNING):
+        bot.cleanup(REPO, "pr-backend-42")
+        bot.cleanup(REPO, "pr-backend-43")
+    assert bot.closed_retries[REPO] == {"pr-backend-42"}
+    assert "retry set full" in caplog.text
+
+
+def test_invalid_closed_pr_does_not_block_sweep(rig, caplog):
+    bot, api, runner, ledger = rig
+    api.comments = []
+    api.closed = [
+        {**PR, "state": "closed", "base": None},
+        {**PR, "state": "closed", "number": None},
+    ]
+    bot.clock = lambda: NOW + timedelta(minutes=1)
+    with caplog.at_level(logging.WARNING):
+        bot.poll()
+    assert ledger.cursor(REPO)[1] == bot.clock().isoformat()
+    assert not runner.calls
+    assert caplog.text.count("Invalid closed PR skipped") == 2
+
+
+def test_nonretryable_pr_read_retains_failed_claim_behavior(rig):
+    bot, api, runner, ledger = rig
+    api.fail_get = True
+    bot.poll()
+    api.fail_get = False
+    bot.poll()
+    assert len(ledger.rows(("FAILED",))) == 1
+    assert not runner.calls
+    assert len(api.posts) == 1
