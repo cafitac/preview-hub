@@ -7,8 +7,16 @@ from pathlib import Path
 import pytest
 import yaml
 
-from preview_hub.contracts import Catalog, CatalogEntry, EnvName, ServiceManifest
+from preview_hub.contracts import (
+    Catalog,
+    CatalogEntry,
+    CompositionSpec,
+    EnvName,
+    ServiceManifest,
+)
+from preview_hub.lifecycle import CreateEnvironment, OperationFailed, UpdateEnvironment
 from preview_hub.plan import PlanBuilder
+from preview_hub.runner import Health
 from preview_hub.runners.compose import ComposeRunner, render, vm_free_bytes
 
 
@@ -97,8 +105,8 @@ def test_apply_order_and_unchanged(plan, tmp_path):
         ["up", "-d", "--wait", "--wait-timeout", "90", "backend--db"],
         ["run", "--rm", "--no-deps", "backend--db--init-0"],
         ["run", "--rm", "--no-deps", "backend--db--init-1"],
-        ["up", "-d", "--no-deps", "backend"],
-        ["up", "-d", "--no-deps", "frontend"],
+        ["up", "-d", "--no-deps", "--force-recreate", "backend"],
+        ["up", "-d", "--no-deps", "--force-recreate", "frontend"],
     ]
     docker.calls.clear()
     assert runner.apply(
@@ -461,3 +469,73 @@ def test_gc_logs_failed_tag_removal_and_continues(tmp_path, caplog):
     assert [call for call in docker.calls if call[1:3] == ["image", "rm"]] == [
         ["docker", "image", "rm", tag] for tag in tags
     ]
+
+
+@pytest.mark.parametrize("update_service", [None, "backend", "frontend"])
+def test_lifecycle_retry_and_update_recreate_changed_services(
+    ctx, plan, tmp_path, monkeypatch, update_service
+):
+    docker = Docker()
+    docker.responses[
+        (
+            "container",
+            "ls",
+            "-q",
+            "-a",
+            "--filter",
+            "label=dev.phub.managed=true",
+            "--filter",
+            "label=dev.phub.service=proxy",
+        )
+    ] = "proxy-id"
+    ctx.runner = ComposeRunner(tmp_path, executor=docker)
+    ctx.catalog = replace(
+        ctx.catalog,
+        services={s.name: CatalogEntry(f"org/{s.name}", "main") for s in plan.services},
+    )
+    ctx.git.manifests = {f"org/{s.name}": s.manifest for s in plan.services}
+    failed = update_service is None
+    monkeypatch.setattr(
+        ctx.runner,
+        "health",
+        lambda env: {
+            s.name: Health.UNHEALTHY if failed else Health.HEALTHY
+            for s in plan.services
+        },
+    )
+    spec = CompositionSpec(plan.env, {s.name: "main" for s in plan.services})
+    if failed:
+        with pytest.raises(OperationFailed) as error:
+            CreateEnvironment(ctx).execute(spec)
+        assert error.value.failure.stage == "health"
+        assert ctx.registry.get(plan.env)["state"] == "FAILED"
+    else:
+        assert CreateEnvironment(ctx).execute(spec)["state"] == "READY"
+    compose_path = tmp_path / "envs" / plan.env / "compose.yaml"
+    previous_config = compose_path.read_text()
+    docker.calls.clear()
+    failed = False
+    if update_service is not None:
+        ctx.git.sha = "b" * 40
+    result = UpdateEnvironment(ctx).execute(
+        plan.env, {update_service or "backend": "main"}
+    )
+    assert result["state"] == "READY"
+    if update_service is None:
+        # FAILED retries must restart even with identical images and configuration.
+        assert compose_path.read_text() == previous_config
+    changed = {update_service} if update_service else {"backend", "frontend"}
+    compose = [args[6:] for args in docker.calls if args[1] == "compose"]
+    expected = []
+    if "backend" in changed:
+        expected.extend(
+            [
+                ["up", "-d", "--wait", "--wait-timeout", "90", "backend--db"],
+                ["run", "--rm", "--no-deps", "backend--db--init-0"],
+                ["run", "--rm", "--no-deps", "backend--db--init-1"],
+                ["up", "-d", "--no-deps", "--force-recreate", "backend"],
+            ]
+        )
+    if "frontend" in changed:
+        expected.append(["up", "-d", "--no-deps", "--force-recreate", "frontend"])
+    assert compose == expected
