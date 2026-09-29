@@ -132,7 +132,7 @@ def test_descriptor_and_migration(ctx):
             db.execute("SELECT value FROM schema_meta WHERE key='version'").fetchone()[
                 0
             ]
-            == "1"
+            == "2"
         )
         assert (
             "WHERE state != 'DELETED'"

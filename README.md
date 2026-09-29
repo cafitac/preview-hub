@@ -103,11 +103,15 @@ U3's stale-operation recovery. `PHUB_GC_INTERVAL` changes the default interval.
 Shared cached service images have service labels, not environment labels.
 
 The image defaults to UID 1000. The stack explicitly uses root because Colima's
-Docker socket is normally root-owned. To run the hub as UID 1000, first grant its
-GID socket access and make both named volumes writable, then set
+Docker socket is normally root-owned. The hub and bot use the same UID/GID.
+To run both as UID 1000, grant their GID socket access and make both named volumes writable, then set
 `PHUB_UID_GID=1000:<socket-gid>` when starting the stack. Socket access grants
-control of the dedicated VM regardless of UID. Traefik has a read-only socket
-mount, Docker-provider ownership constraint, and opt-in routing labels.
+control of the dedicated VM regardless of UID. Use the same `PHUB_UID_GID` when
+running `scripts/vm-bootstrap.sh` and every `scripts/bot-token` install or rotation.
+Both scripts set the secrets directory owner to that UID/GID (default `0:0`)
+with mode `0700`; the token installer sets the token owner to it with mode `0400`.
+Both services need socket access and writable volumes.
+Traefik has a read-only socket mount, Docker-provider ownership constraint, and opt-in routing labels.
 
 Application and init containers use the manifest memory limit; PostgreSQL uses
 512 MiB. PostgreSQL starts and becomes healthy before ordered migration/seed
@@ -216,3 +220,67 @@ The sample is synthetic contract data, not evidence of a live QA run.
 The exit trap deletes all six possible environment names and checks their
 label inventories are empty. Live A6/A8 require the networked runtime host;
 `pytest` validates both contracts without Docker.
+
+## PR bot
+
+The `phub-bot` container polls catalog repositories every 20 seconds. Set
+`PHUB_BOT_INTERVAL` to a finite positive number of seconds to change it.
+It needs no webhook or inbound port.
+
+Create a **fine-grained personal access token** limited to the catalog repositories,
+with **Pull requests: read and write**, **Issues: read and write**,
+**Contents: read**, and **Metadata: read** (implicit). PR conversation replies use
+the issues endpoint but require Pull requests write permission.
+Do not use the host's broad `gh` login token. From the MacBook, pipe the token from
+its secure source into `scripts/bot-token` (never put the value in an argument),
+or run `scripts/bot-token`, paste it at the hidden stdin prompt, and press Ctrl-D.
+Run `scripts/bot-token --check` to check presence without reading its contents.
+The installer uses `PHUB_SSH_HOST`, `PHUB_SSH_OPTS`, and `PHUB_REMOTE_PATH` like
+`scripts/phub`, and writes only inside the `preview-hub` VM, using sudo, mode 0400,
+at `/opt/phub/secrets/github_token`. Bootstrap creates `/opt/phub/secrets`
+with mode 0700. Both directory and installed token are owned by
+`PHUB_UID_GID` (default `0:0`); set it consistently on bootstrap, install,
+rotation, and stack startup. Compose mounts that directory read-only at `/run/secrets`.
+The stack starts without a token. The bot checks `/run/secrets/github_token` each
+loop; if absent or empty it logs `token missing` once and idles. Installing or
+rotating the token takes effect without restarting the container.
+
+Post one command as the entire PR comment:
+
+```text
+/preview up
+/preview up frontend=main ttl=24h
+/preview update backend=main
+/preview status
+/preview down
+```
+
+The environment is `pr-<catalog-service>-<PR-number>`. The PR's service always
+uses the exact current PR head SHA, even if its argument names another ref.
+Other services use the supplied refs or catalog defaults. `ttl` is supported
+only on `up`; `update` requires at least one `service=ref`. Replies show state,
+12-character commits and URLs, or a failure stage/rejection reason. Closing a PR
+removes its environment on a subsequent poll; failed cleanup is retried.
+
+Only OWNER, MEMBER and COLLABORATOR comments on open, same-repository PRs in the
+catalog are allowed. Forks, closed PRs and malformed commands run nothing.
+Commands execute only through `docker exec phub-hub phub`; the mounted Docker
+socket is privileged, so this is a code restriction, not daemon-enforced isolation.
+The bot never includes the token in command arguments, logs, replies or its repr.
+On first start, or when a repository cursor is missing (including a recreated
+state volume), the bot initializes its comment cursor to its start time in UTC.
+A comment is eligible only when its `created_at` is at or after the floor:
+the process start time if no cursor existed, otherwise the persisted comment
+cursor at startup minus the 60-second overlap. The floor stays fixed for that
+process and is recomputed from the persisted cursor on restart. Editing a comment
+created before the applicable floor never makes it eligible.
+A durable comment-ID ledger prevents re-execution across overlapping polls and
+restarts while the ledger is retained. Interrupted commands become FAILED after
+ten minutes and need a new comment. Reply retries are best-effort, in memory,
+with at most three POST attempts per process. The initial reply body is retained
+until delivery succeeds. A restart can drop or repeat an unacknowledged reply:
+it loses the original body, attempt count and retry delay. After restart, replies
+are rebuilt from stored status, environment and error plus a fresh
+`phub status <env> --format json` when an environment exists. GitHub provides no
+idempotency key for issue comments, so acknowledgement loss can cause duplicates.
+Bot data is stored only in the revision-2 bot tables, never in schema metadata.
