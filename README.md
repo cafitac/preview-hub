@@ -323,6 +323,25 @@ reinstall with `scripts/bot-token`. The installer prints `token installed` on
 success. Rate-limit responses remain retryable deferrals. Inspect the
 `phub-bot` logs inside the `preview-hub` VM without printing the secret file.
 
+### PR cross-link comments
+
+Each bot poll links active environments to PRs referenced by `pr-<number>` service
+refs. Each referenced PR gets one comment with the environment state, entry URL,
+and service/ref/pinned-commit table. The originating `/preview` PR is skipped
+because it already receives command replies. Version changes edit the comment;
+removing a PR ref or deleting the environment edits it to `removed`.
+
+The registry records delivery in `pr_links`. Retryable failures retry on the next
+poll. Non-retryable failures pause after
+five failed attempts until the environment version or instance changes. Deleted
+comments are recreated on update or marked removed during cleanup. Retirement of
+an old instance is best effort and does not block its replacement comment. Before
+posting, the bot searches all comments on that PR for its own
+`<!-- phub-link env=<name> -->` marker, recovering interrupted posts without
+creating duplicates. Removed comments stay as history; reusing an environment
+name creates a fresh comment. The existing token needs Issues/Pull requests write
+permission.
+
 ## Public access (Cloudflare, free)
 
 Public access is optional. Without `public_access` in the catalog, existing local

@@ -46,6 +46,8 @@ class GitHubApi(Protocol):
     def list_branches(self, repo: str) -> list[dict[str, Any]]: ...
     def list_open_prs(self, repo: str) -> list[dict[str, Any]]: ...
     def edit_comment(self, repo: str, comment_id: int, body: str) -> None: ...
+    def list_pr_comments(self, repo: str, number: int) -> list[dict[str, Any]]: ...
+    def get_authenticated_user(self) -> str: ...
 
 
 class Response(Protocol):
@@ -280,3 +282,15 @@ class UrllibGitHubApi:
         self._request(
             "PATCH", f"/repos/{repo}/issues/comments/{comment_id}", {"body": body}
         )
+
+    def list_pr_comments(self, repo: str, number: int) -> list[dict[str, Any]]:
+        return self._pages(repo, f"issues/{number}/comments", {})
+
+    def get_authenticated_user(self) -> str:
+        result = self._request("GET", "/user")
+        if not isinstance(result, dict):
+            raise GitHubError("Invalid GitHub response")
+        login = cast(dict[str, Any], result).get("login")
+        if not isinstance(login, str) or not login:
+            raise GitHubError("Invalid GitHub response")
+        return login
