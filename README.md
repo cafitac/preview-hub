@@ -176,3 +176,42 @@ ssh trading-macstudio colima delete --profile preview-hub
 ```
 
 This removes the dedicated VM and all hub state, source caches and preview data.
+
+## Adding a service
+
+Add a root-level `preview.yaml` in the service repository following
+`schemas/service-manifest.schema.json` (build/run/health and any dependencies),
+then add one entry under `services` in `deploy/hub-stack/catalog.yaml`:
+
+```yaml
+notifier: {repo: cafitac/preview-example-notifier, default_ref: main, include: on_request}
+```
+
+No change in `preview_hub/` is needed. Apply the updated catalog to the hub stack.
+The service name in the manifest must match its catalog key. Omit `expose` for
+internal-only services. `include: on_request` keeps the service out of ordinary
+environments; select it with `scripts/phub up demo --set notifier=main` or add it
+to a running environment with `scripts/phub update demo --set notifier=main`.
+Consumers declare an optional dependency and interpolate
+`${services.notifier.internal_url}` in their manifest environment variables;
+the variable is omitted when notifier is absent.
+
+The extended E2E retains A1–A5 and adds A6: three notes produce exactly three
+`note.created` notifications, notes work without notifier, and adding notifier
+restarts backend and delivers the next note exactly once. These scenarios use
+fresh `main` environments, so backend and notifier changes must already be merged.
+Internal notifications are read with Python's HTTP client inside the notifier
+container over SSH, using only Docker context `colima-preview-hub` and the
+wrapper's `PHUB_SSH_*` / `PHUB_REMOTE_*` configuration. Containers are selected
+by exact environment, service, role and ownership labels.
+
+A8 validates a live READY descriptor and
+`e2e/fixtures/sample-qa-report.json` against the checked-out schemas, including
+date-time formats. It uses local `python3` with `jsonschema` if available;
+otherwise it streams the schemas and documents to Python in `phub-hub` over
+the same SSH connection. Nothing is installed on the remote host.
+The sample is synthetic contract data, not evidence of a live QA run.
+`E2E_BASE_REF` (default `11d0aa8`) controls the printed protected-path diff.
+The exit trap deletes all six possible environment names and checks their
+label inventories are empty. Live A6/A8 require the networked runtime host;
+`pytest` validates both contracts without Docker.

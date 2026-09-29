@@ -11,12 +11,13 @@ broken=${E2E_BROKEN_BRANCH:-e2e-broken}
 repo=${E2E_BACKEND_REPO:-https://github.com/cafitac/preview-example-backend.git}
 prefix=ee-$(date +%s)-$$
 a=$prefix-a b=$prefix-b expiry=$prefix-ttl bad=$prefix-bad
+n=$prefix-n y=$prefix-y
 work=$(mktemp -d)
 tunnel_pid=
 cleanup() {
     code=$?
     trap - EXIT HUP INT TERM
-    for env in "$a" "$b" "$expiry" "$bad"; do
+    for env in "$a" "$b" "$expiry" "$bad" "$n" "$y"; do
         "$phub" down "$env" --format json || code=1
         "$phub" inventory "$env" > "$work/inventory.json" || code=1
         python3 -c 'import json,sys; assert not any(json.load(open(sys.argv[1])).values())' "$work/inventory.json" || code=1
@@ -34,7 +35,7 @@ if [ "${E2E_EXISTING_TUNNEL:-0}" != 1 ]; then
 fi
 inventory() {
     echo "Inventory: $1"
-    for env in "$a" "$b" "$expiry" "$bad"; do "$phub" inventory "$env"; done
+    for env in "$a" "$b" "$expiry" "$bad" "$n" "$y"; do "$phub" inventory "$env"; done
 }
 empty() { "$phub" inventory "$1" | python3 -c 'import json,sys; assert not any(json.load(sys.stdin).values())'; }
 request() {
@@ -90,3 +91,90 @@ python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["state"]==
 empty "$bad"
 inventory 'after A5'
 echo 'A1-A5 passed'
+
+# Read-only Docker access through the same SSH configuration as scripts/phub.
+# phub has no arbitrary exec command; never use the host's default context.
+quote() { printf "'"; printf '%s' "$1" | sed "s/'/'\\\\''/g"; printf "'"; }
+vm_docker() {
+    command="export PATH=$(quote "${PHUB_REMOTE_PATH:-/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin}"); $(quote "${PHUB_REMOTE_DOCKER:-docker}") --context colima-preview-hub"
+    for arg do command="$command $(quote "$arg")"; done
+    ssh ${PHUB_SSH_OPTS:-} "${PHUB_SSH_HOST:-trading-macstudio}" "$command"
+}
+container_id() {
+    vm_docker ps --no-trunc -q --filter label=dev.phub.managed=true \
+        --filter "label=dev.phub.env=$1" --filter "label=dev.phub.service=$2" \
+        --filter label=dev.phub.role=service |
+        python3 -c 'import sys; ids=sys.stdin.read().split(); assert len(ids)==1, ids; print(ids[0])'
+}
+ready() {
+    "$phub" status "$1" --format descriptor > "$work/descriptor.json"
+    python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["state"]=="READY" and d["readiness"]["allHealthy"]' "$work/descriptor.json"
+}
+notifications() {
+    notifier_id=$(container_id "$1" notifier)
+    vm_docker exec "$notifier_id" python -c 'import urllib.request; print(urllib.request.urlopen("http://127.0.0.1:8000/api/notifications", timeout=10).read().decode())'
+}
+check_notifications() {
+    notifications "$1" > "$work/notifications.json"
+    shift
+    python3 -c 'import json,sys; entries=json.load(open(sys.argv[1])); expected=sys.argv[2:]; assert len(entries)==len(expected), entries; assert all(e["event"]=="note.created" for e in entries); assert sorted(e["payload"]["text"] for e in entries)==sorted(expected)' "$work/notifications.json" "$@"
+}
+
+inventory 'before A6(a)'
+"$phub" up "$n" --set notifier=main --format json
+ready "$n"
+# N=3: multiple notes catch loss, duplicates and unrelated deliveries.
+for i in 1 2 3; do
+    endpoint=/api/notes request "api.$n.localhost" -H 'Content-Type: application/json' -d "{\"text\":\"$prefix-note-$i\"}"
+done
+check_notifications "$n" "$prefix-note-1" "$prefix-note-2" "$prefix-note-3"
+inventory 'after A6(a) / before A6(b)'
+"$phub" up "$y" --format json
+ready "$y"
+python3 -c 'import json,sys; assert all(s["name"]!="notifier" for s in json.load(open(sys.argv[1]))["services"])' "$work/descriptor.json"
+endpoint=/api/notes request "api.$y.localhost" -H 'Content-Type: application/json' -d "{\"text\":\"$prefix-without\"}"
+endpoint=/api/notes request "api.$y.localhost" > "$work/y.json"
+python3 -c 'import json,sys; assert sum(n["text"]==sys.argv[2] for n in json.load(open(sys.argv[1])))==1' "$work/y.json" "$prefix-without"
+inventory 'after A6(b) / before A6(c)'
+backend_before=$(container_id "$y" backend)
+"$phub" update "$y" --set notifier=main --format json
+ready "$y"
+backend_after=$(container_id "$y" backend)
+[ "$backend_before" != "$backend_after" ]
+echo "Backend restarted: $backend_before -> $backend_after"
+endpoint=/api/notes request "api.$y.localhost" -H 'Content-Type: application/json' -d "{\"text\":\"$prefix-after\"}"
+check_notifications "$y" "$prefix-after"
+# Adding notifier to y must not deliver to or reset n.
+check_notifications "$n" "$prefix-note-1" "$prefix-note-2" "$prefix-note-3"
+inventory 'after A6(c)'
+echo 'A6(d): protected-path diff (expected empty; reviewed by the main task)'
+git -C "$root" diff --stat "${E2E_BASE_REF:-11d0aa8}..HEAD" -- preview_hub schemas
+
+# Send the checked-out schemas as data so fallback validation tests this head.
+ready "$y"
+python3 - "$root" "$work/descriptor.json" > "$work/schema-input.json" <<'PY'
+import json
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1])
+pairs = [
+    ("environment-descriptor", pathlib.Path(sys.argv[2])),
+    ("qa-report", root / "e2e/fixtures/sample-qa-report.json"),
+]
+json.dump([
+    [json.loads((root / "schemas" / (name + ".schema.json")).read_text()),
+     json.loads(path.read_text())]
+    for name, path in pairs
+], sys.stdout)
+PY
+validator='import json,sys; from jsonschema import Draft202012Validator, FormatChecker; pairs=json.load(sys.stdin); [Draft202012Validator.check_schema(s) for s,d in pairs]; [Draft202012Validator(s, format_checker=FormatChecker()).validate(d) for s,d in pairs]; print("A8: descriptor and sample QA report validate")'
+if python3 -c 'import jsonschema' >/dev/null 2>&1; then
+    echo 'A8 validator: local python3 + jsonschema'
+    python3 -c "$validator" < "$work/schema-input.json"
+else
+    echo 'A8 validator: phub-hub Python over SSH (colima-preview-hub)'
+    vm_docker exec -i phub-hub python -c "$validator" < "$work/schema-input.json"
+fi
+inventory 'after A8'
+echo 'A1-A6 and A8 passed; cleanup will verify empty inventories'

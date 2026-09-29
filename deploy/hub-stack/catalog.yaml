@@ -3,4 +3,5 @@ public_url_template: http://{subdomain}.{env}.localhost:18080
 services:
   backend: {repo: cafitac/preview-example-backend, default_ref: main}
   frontend: {repo: cafitac/preview-example-frontend, default_ref: main}
+  notifier: {repo: cafitac/preview-example-notifier, default_ref: main, include: on_request}
 limits: {max_environments: 5, build_concurrency: 2, default_ttl: 24h, max_ttl: 7d}
