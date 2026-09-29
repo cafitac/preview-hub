@@ -37,12 +37,18 @@ free-space guard requires 5 GiB; tests inject a free-space provider through
 phub up feat-x --set backend=feature --ttl 24h
 phub up -f composition.yaml
 phub update feat-x --set backend=main
+phub up pr-demo --set backend=pr-4
 phub status feat-x --format descriptor
 phub list --format json
 phub logs feat-x backend --tail 100
 phub down feat-x
 phub gc
 ```
+
+PR refs use `pr-<n>` (1–7 digits, no leading zero) and pin the current head of an open, same-repository PR.
+Updates re-resolve the head. Branches literally named `pr-<n>` must be addressed by SHA.
+The hub needs `/run/secrets/github_token` for PR refs (override with
+`PHUB_GITHUB_TOKEN_FILE` for tests); the stack mounts the secrets directory read-only.
 
 Exit codes: 0 success, 2 invalid input, 3 busy, 4 capacity/disk guard,
 5 lifecycle failure. All commands accept `--format text|json|descriptor`;
@@ -222,6 +228,9 @@ label inventories are empty. Live A6/A8 require the networked runtime host;
 `pytest` validates both contracts without Docker.
 
 ## PR bot
+
+Service arguments also accept PR refs, for example `/preview up frontend=pr-7`
+or `/preview update backend=pr-4`. They pass unchanged to the hub CLI.
 
 The `phub-bot` container polls catalog repositories every 20 seconds. Set
 `PHUB_BOT_INTERVAL` to a finite positive number of seconds to change it.

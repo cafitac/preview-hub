@@ -127,3 +127,118 @@ def test_hex_named_refs_take_precedence_over_commit_prefixes(
 
     assert source.resolve("org/repo", ref) == named_sha
     assert checked_out == [("org/repo", named_sha)]
+
+
+class FakeGitHub:
+    def __init__(self):
+        self.pr = {
+            "state": "open",
+            "base": {"repo": {"full_name": "org/backend"}},
+            "head": {"repo": {"full_name": "org/backend"}, "sha": "A" * 40},
+        }
+        self.error = None
+        self.calls = []
+
+    def get_pr(self, repo, number):
+        self.calls.append((repo, number))
+        if self.error:
+            raise self.error
+        return self.pr
+
+
+@pytest.mark.parametrize(
+    "ref,number",
+    [
+        ("pr-1", 1),
+        ("pr-9999999", 9999999),
+        ("pr-0", None),
+        ("pr-01", None),
+        ("pr-10000000", None),
+        ("pr-x", None),
+        ("pr-4\n", None),
+        ("main", None),
+    ],
+)
+def test_pr_ref_syntax(ref, number):
+    from preview_hub.git import PrRef
+
+    parsed = PrRef.parse(ref)
+    assert (parsed.number if parsed else None) == number
+
+
+def test_pr_ref_rejects_local_repository_before_github_call(tmp_path):
+    api = FakeGitHub()
+    source = GitCliSource(tmp_path / "cache", github=api)
+    repository = str(tmp_path / "remote")
+
+    with pytest.raises(InvalidInput) as exc:
+        source.resolve(repository, "pr-4")
+
+    assert str(exc.value) == f"{repository} PR #4: pr refs need a GitHub repository"
+    assert api.calls == []
+
+
+def test_pr_head_uses_existing_exact_sha_fetch(tmp_path, monkeypatch):
+    api = FakeGitHub()
+    source = GitCliSource(tmp_path, github=api)
+    calls = []
+
+    def fake_git(*args):
+        calls.append(args)
+        assert args[0] != "ls-remote"
+        return "a" * 40 if "rev-parse" in args else ""
+
+    monkeypatch.setattr(source, "_git", fake_git)
+    assert source.resolve("org/backend", "pr-4") == "a" * 40
+    assert api.calls == [("org/backend", 4)]
+    fetch = next(args for args in calls if "fetch" in args)
+    assert fetch[3:] == (
+        "--depth=1",
+        "--",
+        "https://github.com/org/backend.git",
+        "a" * 40,
+    )
+
+
+@pytest.mark.parametrize(
+    "case,message",
+    [
+        ("closed", "closed or merged"),
+        ("merged", "closed or merged"),
+        ("fork", "fork"),
+        ("base", "base repository"),
+        ("deleted_head", "fork"),
+        ("sha", "invalid head SHA"),
+        ("404", "not found"),
+        ("401", "unauthorized"),
+        ("403", "unauthorized"),
+        ("missing", "token missing"),
+        ("no_client", "token missing"),
+    ],
+)
+def test_pr_rejections_before_checkout(tmp_path, monkeypatch, case, message):
+    from preview_hub.github import GitHubError, TokenMissing
+
+    api = FakeGitHub()
+    if case == "closed":
+        api.pr["state"] = "closed"
+    elif case == "merged":
+        api.pr["merged"] = True
+    elif case in {"fork", "base"}:
+        api.pr["head" if case == "fork" else "base"]["repo"]["full_name"] = (
+            "other/backend"
+        )
+    elif case == "deleted_head":
+        api.pr["head"]["repo"] = None
+    elif case == "sha":
+        api.pr["head"]["sha"] = "invalid"
+    elif case.isdigit():
+        api.error = GitHubError("request failed", status=int(case))
+    elif case == "missing":
+        api.error = TokenMissing("token missing")
+    source = GitCliSource(tmp_path, github=None if case == "no_client" else api)
+    monkeypatch.setattr(
+        source, "checkout", lambda *args: pytest.fail("unexpected checkout")
+    )
+    with pytest.raises(InvalidInput, match=message):
+        source.resolve("org/backend", "pr-4")

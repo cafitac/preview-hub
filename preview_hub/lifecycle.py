@@ -22,7 +22,7 @@ from .contracts import (
     ServiceManifest,
     duration,
 )
-from .git import GitSource
+from .git import GitSource, PrRef
 from .plan import PlanBuilder
 from .registry import BusyError, Registry, now
 from .runner import FailureInfo, Health, Runner
@@ -139,6 +139,7 @@ def _provision(
     op: int,
     old: dict[str, Any] | None,
     changes: set[str],
+    pr_pins: dict[str, str],
 ) -> dict[str, Any]:
     stage = "resolve"
     current: str | None = None
@@ -169,7 +170,9 @@ def _provision(
                 entry = ctx.catalog.services[current]
                 prior = previous.get(current)
                 sha = (
-                    ctx.git.resolve(entry.repo, refs[current])
+                    pr_pins[current]
+                    if current in pr_pins
+                    else ctx.git.resolve(entry.repo, refs[current])
                     if current in changes or prior is None
                     else str(prior["commit_sha"])
                 )
@@ -308,6 +311,15 @@ def _provision(
     return result_env
 
 
+def _resolve_pr_refs(ctx: Context, refs: dict[str, str]) -> dict[str, str]:
+    # Reject PR inputs before recording an operation; use each observed head once.
+    return {
+        service: ctx.git.resolve(ctx.catalog.services[service].repo, ref)
+        for service, ref in refs.items()
+        if PrRef.parse(ref) is not None
+    }
+
+
 class CreateEnvironment:
     def __init__(self, context: Context):
         self.context = context
@@ -357,6 +369,7 @@ class CreateEnvironment:
                     return old
                 raise InvalidInput("Environment is not READY; use phub update or down")
             ctx.disk_guard()
+            pr_pins = _resolve_pr_refs(ctx, spec.services)
             with ctx.registry.transaction() as db:
                 count = db.execute(
                     "SELECT count(*) FROM environments WHERE state!='DELETED'"
@@ -380,7 +393,7 @@ class CreateEnvironment:
                 env_id = cursor.lastrowid
                 op = _operation(db, env_id, "CREATE", requested_by)
             _state(ctx, env_id, "RESOLVING", op)
-            return _provision(ctx, spec, env_id, op, None, set(spec.services))
+            return _provision(ctx, spec, env_id, op, None, set(spec.services), pr_pins)
 
 
 class UpdateEnvironment:
@@ -405,12 +418,14 @@ class UpdateEnvironment:
                     )
                 )
                 ctx.disk_guard()
+            pr_pins = _resolve_pr_refs(ctx, changes)
+            with ctx.registry.transaction() as db:
                 op = _operation(db, old["id"], "UPDATE", requested_by)
                 db.execute(
                     "UPDATE environments SET state='UPDATING',version=version+1,updated_at=? WHERE id=?",
                     (now(), old["id"]),
                 )
-            return _provision(ctx, spec, old["id"], op, old, set(changes))
+            return _provision(ctx, spec, old["id"], op, old, set(changes), pr_pins)
 
 
 class DeleteEnvironment:

@@ -23,6 +23,7 @@ from .contracts import (
     validate,
 )
 from .git import GitCliSource
+from .github import UrllibGitHubApi
 from .lifecycle import (
     CapacityError,
     Context,
@@ -122,12 +123,16 @@ def create_context() -> Context:
     else:
         raise InvalidInput(f"Runner unavailable: {runner_name}")
 
+    github = UrllibGitHubApi(
+        Path(os.environ.get("PHUB_GITHUB_TOKEN_FILE", "/run/secrets/github_token"))
+    )
     return Context(
         Registry(state_dir),
         catalog,
         GitCliSource(
             Path(config_override(config, "PHUB_SOURCE_DIR", "source_dir", "/src")),
             {v.repo: k for k, v in catalog.services.items()},
+            github=github if github.token_present() else None,
         ),
         runner,
         free_space=free_space,
