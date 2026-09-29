@@ -105,3 +105,66 @@ def test_deadline_overflow_is_invalid_input(ctx, monkeypatch):
     monkeypatch.setattr("preview_hub.lifecycle.datetime", FutureDateTime)
     assert main(["up", "feat-x"], ctx) == 2
     assert ctx.registry.list() == []
+
+
+def test_pr_up_and_update_reresolve(ctx, tmp_path, monkeypatch):
+    from conftest import manifest
+    from test_git import FakeGitHub
+
+    from preview_hub.git import GitCliSource
+
+    api = FakeGitHub()
+    source = GitCliSource(tmp_path / "sources", github=api)
+    monkeypatch.setattr(source, "checkout", lambda *args: tmp_path)
+    monkeypatch.setattr(source, "read_manifest", lambda *args: manifest())
+    ctx.git = source
+    assert main(["up", "pr-demo", "--set", "backend=pr-4"], ctx) == 0
+    service = ctx.registry.get("pr-demo")["services"][0]
+    assert service["requested_ref"] == "pr-4"
+    assert service["commit_sha"] == "a" * 40
+    api.pr["head"]["sha"] = "b" * 40
+    assert main(["update", "pr-demo", "--set", "backend=pr-4"], ctx) == 0
+    service = ctx.registry.get("pr-demo")["services"][0]
+    assert service["requested_ref"] == "pr-4"
+    assert service["commit_sha"] == "b" * 40
+    assert api.calls == [("org/backend", 4), ("org/backend", 4)]
+
+
+def test_pr_missing_token_exits_two_without_creation(ctx, tmp_path, capsys):
+    from preview_hub.git import GitCliSource
+
+    ctx.git = GitCliSource(tmp_path)
+    assert main(["up", "pr-demo", "--set", "backend=pr-4"], ctx) == 2
+    assert "GitHub token missing" in capsys.readouterr().err
+    assert ctx.registry.list() == []
+
+
+@pytest.mark.parametrize("present", [False, True])
+def test_context_github_token_override(config_file, tmp_path, monkeypatch, present):
+    config_file.write_text("{}")
+    token = tmp_path / "synthetic_token"
+    monkeypatch.setenv("PHUB_GITHUB_TOKEN_FILE", str(token))
+    if present:
+        token.write_text("synthetic")
+    ctx = create_context()
+    assert (ctx.git.github is not None) == present
+    if present:
+        assert ctx.git.github.token_path == token
+
+
+def test_rejected_pr_update_preserves_ready_environment(ctx, tmp_path, monkeypatch):
+    from conftest import manifest
+    from test_git import FakeGitHub
+
+    from preview_hub.git import GitCliSource
+
+    assert main(["up", "pr-demo"], ctx) == 0
+    before = ctx.registry.get("pr-demo")
+    api = FakeGitHub()
+    api.pr["state"] = "closed"
+    source = GitCliSource(tmp_path / "sources", github=api)
+    monkeypatch.setattr(source, "checkout", lambda *args: tmp_path)
+    monkeypatch.setattr(source, "read_manifest", lambda *args: manifest())
+    ctx.git = source
+    assert main(["update", "pr-demo", "--set", "backend=pr-4"], ctx) == 2
+    assert ctx.registry.get("pr-demo") == before

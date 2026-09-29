@@ -43,6 +43,9 @@ class GitHubApi(Protocol):
     def get_pr(self, repo: str, number: int) -> dict[str, Any]: ...
     def list_closed_prs(self, repo: str, since: str) -> list[dict[str, Any]]: ...
     def post_comment(self, repo: str, number: int, body: str) -> int: ...
+    def list_branches(self, repo: str) -> list[dict[str, Any]]: ...
+    def list_open_prs(self, repo: str) -> list[dict[str, Any]]: ...
+    def edit_comment(self, repo: str, comment_id: int, body: str) -> None: ...
 
 
 class Response(Protocol):
@@ -253,4 +256,27 @@ class UrllibGitHubApi:
             self._request(
                 "POST", f"/repos/{repo}/issues/{number}/comments", {"body": body}
             )["id"]
+        )
+
+    def _first_page(
+        self, repo: str, resource: str, params: dict[str, str]
+    ) -> list[dict[str, Any]]:
+        data = self._request(
+            "GET",
+            f"/repos/{repo}/{resource}?"
+            + urlencode({**params, "per_page": "100", "page": "1"}),
+        )
+        if not isinstance(data, list):
+            raise GitHubError("Invalid GitHub response")
+        return cast(list[dict[str, Any]], data)
+
+    def list_branches(self, repo: str) -> list[dict[str, Any]]:
+        return self._first_page(repo, "branches", {})
+
+    def list_open_prs(self, repo: str) -> list[dict[str, Any]]:
+        return self._first_page(repo, "pulls", {"state": "open"})
+
+    def edit_comment(self, repo: str, comment_id: int, body: str) -> None:
+        self._request(
+            "PATCH", f"/repos/{repo}/issues/comments/{comment_id}", {"body": body}
         )

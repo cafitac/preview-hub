@@ -6,7 +6,7 @@ from urllib.error import HTTPError, URLError
 
 import pytest
 
-from preview_hub.bot.github import GitHubError, TokenMissing, UrllibGitHubApi
+from preview_hub.github import GitHubError, TokenMissing, UrllibGitHubApi
 
 TOKEN = "test-secret-do-not-print"
 
@@ -118,7 +118,7 @@ def test_missing_token(tmp_path):
 
 
 def test_long_retry_after_defers_without_hammering(token_path, monkeypatch):
-    from preview_hub.bot import github
+    from preview_hub import github
 
     monkeypatch.setattr(github.time, "time", lambda: 1000)
     calls, sleeps = [], []
@@ -143,7 +143,7 @@ def test_long_retry_after_defers_without_hammering(token_path, monkeypatch):
 def test_redirects_cannot_forward_authorization():
     from urllib.request import Request
 
-    from preview_hub.bot.github import NoRedirect
+    from preview_hub.github import NoRedirect
 
     with pytest.raises(GitHubError, match="redirects"):
         NoRedirect().redirect_request(
@@ -160,7 +160,7 @@ def test_redirects_cannot_forward_authorization():
 
 @pytest.mark.parametrize("later_status", [200, 403, 404])
 def test_expired_cooldown_is_cleared(token_path, monkeypatch, later_status):
-    from preview_hub.bot import github
+    from preview_hub import github
 
     now = [1000.0]
     monkeypatch.setattr(github.time, "time", lambda: now[0])
@@ -218,3 +218,50 @@ def test_authentication_diagnostic(token_path, caplog, status, headers, authenti
         "authentication failed: repo=owner/backend" in caplog.text
     ) == authentication
     assert TOKEN not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "method,resource",
+    [
+        ("list_branches", "branches?per_page=100&page=1"),
+        ("list_open_prs", "pulls?state=open&per_page=100&page=1"),
+    ],
+)
+def test_listing_is_one_page(token_path, method, resource):
+    calls = []
+    rows = [{"name": "main", "commit": {"sha": "a" * 40}}] * 100
+
+    def transport(request, *, timeout):
+        assert timeout == 20
+        calls.append(request)
+        assert request.method == "GET"
+        assert (
+            request.full_url == f"https://api.github.com/repos/org/backend/{resource}"
+        )
+        return io.BytesIO(json.dumps(rows).encode())
+
+    api = UrllibGitHubApi(token_path, transport=transport)
+    assert getattr(api, method)("org/backend") == rows
+    assert len(calls) == 1
+
+
+def test_edit_comment_patch_payload_and_retry(token_path):
+    calls, sleeps = [], []
+
+    def transport(request, *, timeout):
+        assert timeout == 20
+        calls.append(request)
+        assert request.method == "PATCH"
+        assert (
+            request.full_url
+            == "https://api.github.com/repos/org/backend/issues/comments/9"
+        )
+        assert json.loads(request.data) == {"body": "updated"}
+        if len(calls) == 1:
+            raise HTTPError(request.full_url, 503, "failure", Message(), io.BytesIO())
+        return io.BytesIO(b'{"id":9}')
+
+    api = UrllibGitHubApi(token_path, transport=transport, sleep=sleeps.append)
+    assert api.edit_comment("org/backend", 9, "updated") is None
+    assert len(calls) == 2
+    assert sleeps == [1]

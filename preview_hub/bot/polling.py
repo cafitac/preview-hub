@@ -12,11 +12,11 @@ from typing import Any, cast
 
 from preview_hub.cli import config_override, load_config
 from preview_hub.contracts import Catalog, InvalidInput, load_yaml
+from preview_hub.github import GitHubApi, GitHubError, UrllibGitHubApi
 from preview_hub.registry import Registry
 
 from .commands import Command, authorize, environment_name, parse_command, repository
 from .executor import Executor, Result, format_reply
-from .github import GitHubApi, GitHubError, UrllibGitHubApi
 from .ledger import Ledger, overlap
 
 LOG = logging.getLogger(__name__)

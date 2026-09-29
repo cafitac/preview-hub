@@ -15,6 +15,8 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - phub-state:/state
       - phub-src:/src
+      # Read-only GitHub token for pr refs and listing.
+      - /opt/phub/secrets:/run/secrets:ro
       - ./catalog.yaml:/etc/phub/catalog.yaml:ro
     labels:
       dev.phub.managed: "true"

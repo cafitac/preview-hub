@@ -12,11 +12,11 @@ import pytest
 
 from preview_hub.bot.commands import Command, authorize, environment_name, parse_command
 from preview_hub.bot.executor import Executor, Result, format_reply
-from preview_hub.bot.github import GitHubError
 from preview_hub.bot.ledger import Ledger, overlap
 from preview_hub.bot.polling import PollingBot, parse_interval
 from preview_hub.cli import main
 from preview_hub.contracts import Catalog, CatalogEntry, InvalidInput
+from preview_hub.github import GitHubError
 from preview_hub.registry import Registry
 
 REPO = "owner/backend"
@@ -591,7 +591,7 @@ def test_token_appearing_starts_polling_without_restart(
     tmp_path, catalog, monkeypatch, caplog
 ):
     from preview_hub.bot import polling
-    from preview_hub.bot.github import UrllibGitHubApi
+    from preview_hub.github import UrllibGitHubApi
 
     token = tmp_path / "github_token"
     monkeypatch.setattr(
@@ -960,7 +960,7 @@ def test_503_cooldown_then_404_does_not_starve_comments(rig, tmp_path, monkeypat
     from email.message import Message
     from urllib.error import HTTPError
 
-    from preview_hub.bot import github
+    from preview_hub import github
 
     bot, api, runner, ledger = rig
     token = tmp_path / "token"
@@ -1101,3 +1101,40 @@ def test_serve_resolves_shared_cli_configuration(tmp_path, catalog, monkeypatch,
         polling.serve(sleep=stop)
     assert paths == [expected_catalog]
     assert states == [expected_state]
+
+
+@pytest.mark.parametrize("action", ["up", "update"])
+def test_pr_ref_arguments_pass_through(action, ctx):
+    from preview_hub.bot.commands import parse_command
+
+    command = parse_command(f"/preview {action} backend=pr-4", ctx.catalog)
+    assert command.refs == {"backend": "pr-4"}
+    assert command.normalized() == f"/preview {action} backend=pr-4"
+
+
+@pytest.mark.parametrize("action", ["up", "update"])
+def test_executor_preserves_other_service_pr_ref(action, catalog):
+    command = parse_command(f"/preview {action} frontend=pr-7", catalog)
+    calls = []
+
+    def runner(args):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, stdout="{}", stderr="")
+
+    assert Executor(runner).execute(command, "pr-backend-42", "backend", SHA).code == 0
+    assert calls == [
+        [
+            "docker",
+            "exec",
+            "phub-hub",
+            "phub",
+            action,
+            "pr-backend-42",
+            "--set",
+            f"backend={SHA}",
+            "--set",
+            "frontend=pr-7",
+            "--format",
+            "json",
+        ]
+    ]
