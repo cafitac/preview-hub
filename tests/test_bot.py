@@ -779,7 +779,7 @@ def test_existing_cursor_accepts_late_overlap_comment_after_restart(rig, catalog
     "error",
     [
         GitHubError("cooldown", attempted=False),
-        GitHubError("rate limit", retry_at=123),
+        GitHubError("rate limit", retry_at=123, retryable=True),
         GitHubError("temporary", retryable=True),
     ],
 )
@@ -885,11 +885,15 @@ def test_invalid_closed_pr_does_not_block_sweep(rig, caplog):
     assert caplog.text.count("Invalid closed PR skipped") == 2
 
 
-def test_nonretryable_pr_read_retains_failed_claim_behavior(rig):
+@pytest.mark.parametrize("retry_at", [0, 123])
+def test_nonretryable_pr_read_retains_failed_claim_behavior(rig, retry_at):
     bot, api, runner, ledger = rig
-    api.fail_get = True
+
+    def fail(repo, number):
+        raise GitHubError("unavailable", retry_at=retry_at)
+
+    api.get_pr = fail
     bot.poll()
-    api.fail_get = False
     bot.poll()
     assert len(ledger.rows(("FAILED",))) == 1
     assert not runner.calls
@@ -948,3 +952,53 @@ def test_reply_query_excludes_acknowledged_rows_in_sql(rig, monkeypatch):
     bot.replies()
     assert selected == [11, 12, 13]
     assert len(api.posts) == 3
+
+
+def test_503_cooldown_then_404_does_not_starve_comments(rig, tmp_path, monkeypatch):
+    import io
+    from email.message import Message
+    from urllib.error import HTTPError
+
+    from preview_hub.bot import github
+
+    bot, api, runner, ledger = rig
+    token = tmp_path / "token"
+    token.write_text("test-token")
+    now = [NOW.timestamp()]
+    monkeypatch.setattr(github.time, "time", lambda: now[0])
+    statuses = iter([503, 503, 503, 404])
+    calls = []
+
+    def transport(request, *, timeout):
+        calls.append(request.full_url)
+        raise HTTPError(
+            request.full_url, next(statuses), "failure", Message(), io.BytesIO()
+        )
+
+    client = github.UrllibGitHubApi(token, transport=transport, sleep=lambda _: None)
+    api.get_pr = client.get_pr
+    api.comments[0].update(
+        body="/preview status", updated_at=(NOW + timedelta(seconds=10)).isoformat()
+    )
+    bot.poll()
+    assert len(calls) == 3
+    assert client.retry_at > now[0]
+    assert not ledger.contains(100)
+    assert ledger.cursor(REPO)[0] == NOW.isoformat()
+
+    # An active cooldown performs no request and cannot consume the comment.
+    bot.poll()
+    assert len(calls) == 3
+    assert not ledger.contains(100)
+    assert ledger.cursor(REPO)[0] == NOW.isoformat()
+
+    now[0] = client.retry_at
+    bot.poll()
+    bot.poll()
+    assert len(calls) == 4
+    assert client.retry_at == 0
+    assert len(ledger.rows(("FAILED",))) == 1
+    assert ledger.cursor(REPO)[0] == api.comments[0]["updated_at"]
+    assert not runner.calls
+    assert len(api.posts) == 1
+    assert "Unable to read PR" in api.posts[0][2]

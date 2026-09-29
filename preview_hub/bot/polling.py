@@ -74,7 +74,7 @@ class PollingBot:
             try:
                 pr = self.api.get_pr(repo, number)
             except GitHubError as exc:
-                if not exc.attempted or exc.retry_at or exc.retryable:
+                if not exc.attempted or exc.retryable:
                     raise
                 read_error = exc
         # Claim only after PR reads can be evaluated; execution remains deduplicated.

@@ -156,3 +156,35 @@ def test_redirects_cannot_forward_authorization():
             {},
             "https://untrusted.example",
         )
+
+
+@pytest.mark.parametrize("later_status", [200, 403, 404])
+def test_expired_cooldown_is_cleared(token_path, monkeypatch, later_status):
+    from preview_hub.bot import github
+
+    now = [1000.0]
+    monkeypatch.setattr(github.time, "time", lambda: now[0])
+    statuses = iter([503, 503, 503, later_status])
+
+    def transport(request, *, timeout):
+        status = next(statuses)
+        if status != 200:
+            raise HTTPError(
+                request.full_url, status, "failure", Message(), io.BytesIO()
+            )
+        return io.BytesIO(b'{"number": 42}')
+
+    api = UrllibGitHubApi(token_path, transport=transport, sleep=lambda _: None)
+    with pytest.raises(GitHubError) as first:
+        api.get_pr("owner/backend", 42)
+    assert first.value.retryable
+    assert api.retry_at == first.value.retry_at == 1004
+    now[0] = api.retry_at
+    if later_status == 200:
+        assert api.get_pr("owner/backend", 42) == {"number": 42}
+    else:
+        with pytest.raises(GitHubError) as later:
+            api.get_pr("owner/backend", 42)
+        assert not later.value.retryable
+        assert later.value.retry_at == 0
+    assert api.retry_at == 0

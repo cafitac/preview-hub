@@ -89,8 +89,12 @@ class UrllibGitHubApi:
     ) -> Any:
         if time.time() < self.retry_at:
             raise GitHubError(
-                "GitHub rate limit cooldown", retry_at=self.retry_at, attempted=False
+                "GitHub rate limit cooldown",
+                retry_at=self.retry_at,
+                attempted=False,
+                retryable=True,
             )
+        self.retry_at = 0.0
         # Token lives only in this request's Authorization header, never on self.
         try:
             token = self.token_path.read_text().strip()
@@ -114,7 +118,9 @@ class UrllibGitHubApi:
                 )
                 response = self.transport(request, timeout=self.timeout)
                 try:
-                    return json.loads(response.read())
+                    result = json.loads(response.read())
+                    self.retry_at = 0.0
+                    return result
                 finally:
                     response.close()
             except HTTPError as exc:
@@ -161,7 +167,9 @@ class UrllibGitHubApi:
                     if retry:
                         self.retry_at = time.time() + delay
                     raise GitHubError(
-                        "GitHub request failed", retry_at=self.retry_at, retryable=retry
+                        "GitHub request failed",
+                        retry_at=self.retry_at if retry else 0,
+                        retryable=retry,
                     ) from None
             except (OSError, HTTPException):
                 raise GitHubError("GitHub request failed", retryable=True) from None
