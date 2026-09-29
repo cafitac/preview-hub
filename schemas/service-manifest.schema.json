@@ -1,0 +1,194 @@
+{
+  "type": "object",
+  "properties": {
+    "apiVersion": {
+      "const": "preview-hub/v1"
+    },
+    "service": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,20}$"
+    },
+    "build": {
+      "type": "object",
+      "properties": {
+        "context": {
+          "type": "string",
+          "minLength": 1
+        },
+        "dockerfile": {
+          "type": "string",
+          "minLength": 1
+        },
+        "args": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "propertyNames": {
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          }
+        }
+      },
+      "required": [
+        "context",
+        "dockerfile"
+      ],
+      "additionalProperties": false
+    },
+    "run": {
+      "type": "object",
+      "properties": {
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "command": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "memory": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*(Mi|Gi)$"
+        }
+      },
+      "required": [
+        "port"
+      ],
+      "additionalProperties": false
+    },
+    "expose": {
+      "type": "object",
+      "properties": {
+        "subdomain": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{1,20}$"
+        }
+      },
+      "required": [
+        "subdomain"
+      ],
+      "additionalProperties": false
+    },
+    "health": {
+      "type": "object",
+      "properties": {
+        "http": {
+          "type": "string"
+        },
+        "cmd": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "timeout": {
+          "type": "string",
+          "pattern": "^(?:(?:[1-9][0-9]{0,7}|[1-2][0-9]{8}|30[0-9]{7}|31[0-4][0-9]{6}|315[0-2][0-9]{5}|3153[0-5][0-9]{4}|315360000)s|(?:[1-9][0-9]{0,5}|[1-4][0-9]{6}|5[0-1][0-9]{5}|52[0-4][0-9]{4}|525[0-5][0-9]{3}|5256000)m|(?:[1-9][0-9]{0,3}|[1-7][0-9]{4}|8[0-6][0-9]{3}|87[0-5][0-9]{2}|87600)h|(?:[1-9][0-9]{0,2}|[1-2][0-9]{3}|3[0-5][0-9]{2}|36[0-4][0-9]{1}|3650)d)$",
+          "default": "90s"
+        }
+      },
+      "required": [],
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "required": [
+            "http"
+          ],
+          "not": {
+            "required": [
+              "cmd"
+            ]
+          }
+        },
+        {
+          "required": [
+            "cmd"
+          ],
+          "not": {
+            "required": [
+              "http"
+            ]
+          }
+        }
+      ]
+    },
+    "requires": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "service": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{1,20}$"
+          },
+          "optional": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "service"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "resources": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9]{0,20}$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "const": "postgres"
+          },
+          "version": {
+            "type": "string"
+          },
+          "init": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "required": [
+          "type",
+          "version"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "env": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "propertyNames": {
+        "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+      }
+    }
+  },
+  "required": [
+    "apiVersion",
+    "service",
+    "build",
+    "run",
+    "health"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

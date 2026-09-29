@@ -1,0 +1,15 @@
+apiVersion: preview-hub/v1
+service: frontend
+build:
+  context: .
+  dockerfile: Dockerfile
+run:
+  port: 8080
+expose:
+  subdomain: app
+health:
+  http: /
+requires:
+  - service: backend
+env:
+  API_URL: ${services.backend.public_url}

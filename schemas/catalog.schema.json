@@ -1,0 +1,76 @@
+{
+  "type": "object",
+  "properties": {
+    "apiVersion": {
+      "const": "preview-hub/v1"
+    },
+    "public_url_template": {
+      "type": "string"
+    },
+    "services": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "repo": {
+            "type": "string"
+          },
+          "default_ref": {
+            "type": "string"
+          },
+          "include": {
+            "enum": [
+              "always",
+              "on_request"
+            ]
+          }
+        },
+        "required": [
+          "repo",
+          "default_ref"
+        ],
+        "additionalProperties": false
+      },
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9-]{1,20}$"
+      }
+    },
+    "limits": {
+      "type": "object",
+      "properties": {
+        "max_environments": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "build_concurrency": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2
+        },
+        "default_ttl": {
+          "type": "string",
+          "pattern": "^(?:(?:[1-9][0-9]{0,7}|[1-2][0-9]{8}|30[0-9]{7}|31[0-4][0-9]{6}|315[0-2][0-9]{5}|3153[0-5][0-9]{4}|315360000)s|(?:[1-9][0-9]{0,5}|[1-4][0-9]{6}|5[0-1][0-9]{5}|52[0-4][0-9]{4}|525[0-5][0-9]{3}|5256000)m|(?:[1-9][0-9]{0,3}|[1-7][0-9]{4}|8[0-6][0-9]{3}|87[0-5][0-9]{2}|87600)h|(?:[1-9][0-9]{0,2}|[1-2][0-9]{3}|3[0-5][0-9]{2}|36[0-4][0-9]{1}|3650)d)$"
+        },
+        "max_ttl": {
+          "type": "string",
+          "pattern": "^(?:(?:[1-9][0-9]{0,7}|[1-2][0-9]{8}|30[0-9]{7}|31[0-4][0-9]{6}|315[0-2][0-9]{5}|3153[0-5][0-9]{4}|315360000)s|(?:[1-9][0-9]{0,5}|[1-4][0-9]{6}|5[0-1][0-9]{5}|52[0-4][0-9]{4}|525[0-5][0-9]{3}|5256000)m|(?:[1-9][0-9]{0,3}|[1-7][0-9]{4}|8[0-6][0-9]{3}|87[0-5][0-9]{2}|87600)h|(?:[1-9][0-9]{0,2}|[1-2][0-9]{3}|3[0-5][0-9]{2}|36[0-4][0-9]{1}|3650)d)$"
+        }
+      },
+      "required": [
+        "max_environments",
+        "build_concurrency",
+        "default_ttl",
+        "max_ttl"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "apiVersion",
+    "public_url_template",
+    "services",
+    "limits"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}
