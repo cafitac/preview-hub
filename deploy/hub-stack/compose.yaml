@@ -1,0 +1,45 @@
+services:
+  hub:
+    image: phub/hub:local
+    container_name: phub-hub
+    # Colima's root-owned socket normally requires root. Override with uid:gid
+    # only after granting that uid socket access and ownership of both volumes.
+    user: "${PHUB_UID_GID:-0:0}"
+    command: [phub, serve]
+    restart: unless-stopped
+    environment:
+      PHUB_RUNNER: compose
+      PHUB_DAEMON_NAME: colima-preview-hub
+      PHUB_GC_INTERVAL: "900"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - phub-state:/state
+      - phub-src:/src
+      - ./catalog.yaml:/etc/phub/catalog.yaml:ro
+    labels:
+      dev.phub.managed: "true"
+      dev.phub.service: hub
+  proxy:
+    image: traefik:v3
+    container_name: phub-proxy
+    restart: unless-stopped
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.constraints=Label(`dev.phub.managed`,`true`)
+      - --entrypoints.web.address=:80
+    ports: ["127.0.0.1:18080:80"]
+    volumes: [/var/run/docker.sock:/var/run/docker.sock:ro]
+    labels:
+      dev.phub.managed: "true"
+      dev.phub.service: proxy
+volumes:
+  phub-state:
+    name: phub-state
+    labels: {dev.phub.managed: "true", dev.phub.service: hub}
+  phub-src:
+    name: phub-src
+    labels: {dev.phub.managed: "true", dev.phub.service: hub}
+networks:
+  default:
+    labels: {dev.phub.managed: "true", dev.phub.service: hub}

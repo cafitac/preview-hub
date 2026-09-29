@@ -20,7 +20,7 @@ from preview_hub.plan import PlanBuilder
 
 def build(ctx, manifests, name="feat-x"):
     return PlanBuilder().build(
-        name,
+        EnvName(name),
         manifests,
         ctx.catalog,
         {n: "a" * 40 for n in manifests},
@@ -256,7 +256,7 @@ def test_changed_compares_rendered_service_spec(ctx, field, value):
         previous, services=(replace(previous.services[0], **{field: value}),)
     )
     plan = PlanBuilder().build(
-        "feat-x",
+        EnvName("feat-x"),
         manifests,
         ctx.catalog,
         {"backend": "a" * 40},

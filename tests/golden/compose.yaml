@@ -1,0 +1,114 @@
+services:
+  backend--db:
+    image: postgres:16
+    container_name: phub-test-one--backend--db
+    labels: &id002
+      dev.phub.managed: 'true'
+      dev.phub.env: test-one
+      dev.phub.service: backend
+    networks:
+    - environment
+    environment:
+      POSTGRES_USER: preview
+      POSTGRES_PASSWORD: preview
+      POSTGRES_DB: preview
+    volumes:
+    - backend--db:/var/lib/postgresql/data
+    mem_limit: 536870912
+    healthcheck:
+      test:
+      - CMD
+      - pg_isready
+      - -U
+      - preview
+      - -d
+      - preview
+      interval: 2s
+      timeout: 2s
+      retries: 45
+  backend:
+    image: phub/backend:aaaaaaaaaaaa
+    labels:
+      dev.phub.managed: 'true'
+      dev.phub.env: test-one
+      dev.phub.service: backend
+      dev.phub.role: service
+      dev.phub.health: '{"timeout": "90s", "http": "/healthz"}'
+      dev.phub.port: '8000'
+      traefik.enable: 'true'
+      traefik.docker.network: phub-test-one
+      traefik.http.routers.test-one-backend.rule: Host(`api.test-one.localhost`)
+      traefik.http.routers.test-one-backend.service: test-one-backend
+      traefik.http.services.test-one-backend.loadbalancer.server.port: '8000'
+    networks:
+    - environment
+    environment: &id001
+      DATABASE_URL: postgresql://preview:preview@backend--db:5432/preview
+      CORS_ORIGINS: http://app.test-one.localhost:18080
+    mem_limit: 536870912
+  backend--db--init-0:
+    image: phub/backend:aaaaaaaaaaaa
+    entrypoint:
+    - alembic
+    - upgrade
+    - head
+    environment: *id001
+    mem_limit: 536870912
+    networks:
+    - environment
+    labels:
+      dev.phub.managed: 'true'
+      dev.phub.env: test-one
+      dev.phub.service: backend
+      dev.phub.role: init
+    profiles:
+    - init
+    restart: 'no'
+  backend--db--init-1:
+    image: phub/backend:aaaaaaaaaaaa
+    entrypoint:
+    - python
+    - -m
+    - app.seed
+    environment: *id001
+    mem_limit: 536870912
+    networks:
+    - environment
+    labels:
+      dev.phub.managed: 'true'
+      dev.phub.env: test-one
+      dev.phub.service: backend
+      dev.phub.role: init
+    profiles:
+    - init
+    restart: 'no'
+  frontend:
+    image: phub/frontend:aaaaaaaaaaaa
+    labels:
+      dev.phub.managed: 'true'
+      dev.phub.env: test-one
+      dev.phub.service: frontend
+      dev.phub.role: service
+      dev.phub.health: '{"timeout": "90s", "http": "/"}'
+      dev.phub.port: '8080'
+      traefik.enable: 'true'
+      traefik.docker.network: phub-test-one
+      traefik.http.routers.test-one-frontend.rule: Host(`app.test-one.localhost`)
+      traefik.http.routers.test-one-frontend.service: test-one-frontend
+      traefik.http.services.test-one-frontend.loadbalancer.server.port: '8080'
+    networks:
+    - environment
+    environment:
+      API_URL: http://api.test-one.localhost:18080
+    mem_limit: 536870912
+networks:
+  environment:
+    name: phub-test-one
+    labels:
+      dev.phub.managed: 'true'
+      dev.phub.env: test-one
+      dev.phub.service: shared
+volumes:
+  backend--db:
+    name: phub-test-one--backend--db
+    labels: *id002
