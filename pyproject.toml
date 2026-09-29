@@ -19,6 +19,7 @@ include = ["preview_hub"]
 typeCheckingMode = "strict"
 pythonVersion = "3.12"
 [tool.ruff]
+extend-exclude = [".dev"]
 target-version = "py312"
 [tool.pytest.ini_options]
 testpaths = ["tests"]

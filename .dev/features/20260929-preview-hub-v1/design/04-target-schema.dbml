@@ -1,0 +1,60 @@
+Project target_schema {
+  database_type: 'SQLite'
+  Note: 'preview-hub v1 environment registry (/state/state.db on the phub-state volume inside the preview-hub Colima VM). Schema revision 1. Application-level invariants are marked [app]; the rest is enforced by SQLite.'
+}
+
+Table environments {
+  id integer [pk, increment]
+  name text [not null, note: 'EnvName: ^[a-z][a-z0-9-]{1,30}$; used in Compose project, network, labels, hostnames']
+  state text [not null, note: 'REQUESTED|RESOLVING|BUILDING|STARTING|READY|UPDATING|FAILED|DELETING|DELETED']
+  spec_json text [not null, note: 'CompositionSpec as requested (after catalog defaults)']
+  ttl_expires_at text [not null, note: 'UTC ISO-8601']
+  version integer [not null, default: 1, note: 'optimistic version, +1 per state change']
+  last_error_json text [null, note: 'FailureInfo']
+  created_at text [not null]
+  updated_at text [not null]
+  deleted_at text [null]
+
+  indexes {
+    (name) [unique, name: 'uq_env_active_name', note: 'partial: WHERE state != "DELETED" (created in migration SQL)']
+    (state, ttl_expires_at) [name: 'ix_env_expiry']
+  }
+}
+
+Table environment_services {
+  environment_id integer [not null, ref: > environments.id]
+  service text [not null]
+  repo text [not null, note: 'owner/name']
+  requested_ref text [not null]
+  commit_sha text [not null, note: '40 hex; immutable for this row [app]']
+  image text [not null, note: 'phub/<service>:<sha12>']
+  public_url text [null]
+  health text [null, note: 'UNKNOWN|STARTING|HEALTHY|UNHEALTHY']
+
+  indexes {
+    (environment_id, service) [pk]
+  }
+}
+
+Table operations {
+  id integer [pk, increment]
+  environment_id integer [not null, ref: > environments.id]
+  kind text [not null, note: 'CREATE|UPDATE|DELETE|EXPIRE']
+  status text [not null, note: 'RUNNING|SUCCEEDED|FAILED|INTERRUPTED']
+  requested_by text [not null, note: 'cli:<user> | gh:<login>#<pr>']
+  pid integer [not null]
+  heartbeat_at text [not null]
+  started_at text [not null]
+  finished_at text [null]
+  error_json text [null]
+
+  indexes {
+    (environment_id, status) [name: 'ix_op_env_status']
+  }
+  Note: '[app] at most one RUNNING row per environment, guaranteed by the per-environment file lock held for the whole operation'
+}
+
+Table schema_meta {
+  key text [pk]
+  value text [not null]
+}

@@ -1,0 +1,117 @@
+@startuml
+title preview-hub v1 domain model
+hide empty members
+
+package "Environment (hub-owned authority)" {
+  class Environment <<AggregateRoot>> {
+    name : EnvName
+    state : EnvState
+    pins : PinnedService[1..*]
+    ttl_expires_at : datetime
+    version : int
+    last_error : FailureInfo?
+    --
+    +request_create(spec, catalog)
+    +mark_resolved(pins)
+    +mark_ready(health)
+    +mark_failed(failure)
+    +request_update(ref_changes)
+    +request_delete()
+    +expire(now)
+  }
+  class PinnedService <<Domain Value Object>> {
+    service : ServiceName
+    repo : RepoRef
+    requested_ref : string
+    commit_sha : string(40)
+    image : string
+  }
+  class FailureInfo <<Domain Value Object>> {
+    stage : resolve|build|start|health|delete
+    service : ServiceName?
+    message : string
+    log_excerpt : string
+  }
+}
+
+package "Contracts (value objects parsed from files)" {
+  class ServiceManifest <<Domain Value Object>> {
+    api_version = preview-hub/v1
+    service : ServiceName
+    build, expose, health, env, resources, requires
+    --
+    validate()
+  }
+  class Catalog <<Domain Value Object>> {
+    services : map<ServiceName, CatalogEntry>
+    --
+    complete(spec) : full service set with defaults
+  }
+  class CompositionSpec <<Domain Value Object>> {
+    name : EnvName
+    services : map<ServiceName, ref>
+    ttl : duration
+  }
+  class EnvironmentPlan <<Domain Value Object>> {
+    env : EnvName
+    services : ordered by requires
+    injected env per service
+    routes, resources, labels
+  }
+}
+
+package "Application (UseCases, execute() only)" {
+  class CreateEnvironment
+  class UpdateEnvironment
+  class DeleteEnvironment
+  class ExpireEnvironments
+  class DescribeEnvironment
+  class PlanBuilder <<service>> {
+    +build(env, manifests, catalog) : EnvironmentPlan
+  }
+}
+
+package "External boundaries" {
+  interface GitSource {
+    +resolve(repo, ref) : commit_sha
+    +checkout(repo, commit_sha) : path
+    +read_manifest(repo, commit_sha) : ServiceManifest
+  }
+  interface Runner {
+    +build(service, commit, path) : image
+    +apply(plan) : RunResult
+    +health(env) : map<ServiceName, Health>
+    +destroy(env) : Inventory
+    +inventory(env?) : Inventory
+  }
+  class ComposeRunner
+  class FakeRunner <<test double>>
+  interface GitHubComments <<S3>>
+}
+
+Environment "1" *-- "1..*" PinnedService
+Environment o-- FailureInfo
+CreateEnvironment ..> Environment
+CreateEnvironment ..> PlanBuilder
+PlanBuilder ..> ServiceManifest
+PlanBuilder ..> Catalog
+CreateEnvironment ..> GitSource
+CreateEnvironment ..> Runner
+Runner <|.. ComposeRunner
+Runner <|.. FakeRunner
+
+note right of Environment
+  Invariants:
+  - name unique among non-DELETED environments
+  - pins are immutable once resolved; changing a ref
+    is an explicit update that re-resolves
+  - at most one operation in flight per environment
+  - every Docker object of the environment carries
+    dev.phub.env=<name>; deletion is by label, not by registry rows
+end note
+note bottom of ServiceManifest
+  Build inputs may not reference other services.
+  Cross-service values are injected at start
+  (${services.<name>.public_url}, ${resources.<id>.url}).
+end note
+@enduml
