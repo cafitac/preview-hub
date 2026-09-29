@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Preview Hub · 환경 관리</title>
+  <style>
+    :root { color-scheme: light; --bg:#f5f6f8; --surface:#fff; --text:#172033; --muted:#526078; --line:#c5ccd6; --accent:#174ab5; --danger:#a52323; --space:8px; --radius:8px; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font:16px/1.5 system-ui,sans-serif; }
+    main { max-width:1120px; margin:auto; padding:calc(var(--space)*4); }
+    header { display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:var(--space); }
+    h1 { font-size:28px; } h2 { font-size:20px; } small,.muted { color:var(--muted); }
+    section { background:var(--surface); padding:calc(var(--space)*3); border-radius:var(--radius); margin:calc(var(--space)*3) 0; }
+    .fields { display:flex; flex-wrap:wrap; gap:calc(var(--space)*2); }
+    label { display:flex; flex-direction:column; gap:var(--space); flex:1 1 240px; }
+    input,select,button { font:inherit; border:1px solid var(--line); border-radius:var(--radius); padding:var(--space); min-height:44px; }
+    input,select { width:100%; background:var(--surface); color:var(--text); }
+    button { cursor:pointer; color:var(--surface); background:var(--accent); font-weight:600; white-space:nowrap; }
+    button:hover { opacity:.85; } button:disabled { opacity:.5; cursor:wait; }
+    :focus-visible { outline:3px solid var(--accent); outline-offset:3px; }
+    .delete { background:var(--surface); color:var(--danger); }
+    a { color:var(--accent); overflow-wrap:anywhere; }
+    .table-wrap { overflow-x:auto; } table { width:100%; border-collapse:collapse; text-align:left; }
+    th,td { padding:calc(var(--space)*2) var(--space); border-bottom:1px solid var(--line); vertical-align:top; }
+    th { white-space:nowrap; } .badge { display:inline-block; padding:0 var(--space); border:1px solid var(--line); border-radius:var(--radius); font-size:14px; }
+    .error { color:var(--danger); } #message { min-height:24px; } #create-button { margin-top:calc(var(--space)*2); }
+    @media (max-width:600px) { main { padding:calc(var(--space)*2); } section { padding:calc(var(--space)*2); } }
+  </style>
+</head>
+<body><main>
+  <header><h1>Preview Hub</h1><span>{{ email }}</span></header>
+  <p id="message" role="status" aria-live="polite"></p>
+  <section aria-labelledby="environments-title">
+    <header><h2 id="environments-title">환경 목록</h2><button type="button" id="refresh">새로고침</button></header>
+    <div class="table-wrap"><table>
+      <thead><tr><th>이름</th><th>상태</th><th>서비스 · ref → 커밋</th><th>접속 URL</th><th>만료 시각 (TTL)</th><th>관리</th></tr></thead>
+      <tbody id="environments">
+        {% for env in environments %}
+        <tr data-state="{{ env.state }}">
+          <td>{{ env.name }}</td><td><span class="badge">{{ env.state }}</span>{% if env.last_error %}<p class="error">{{ env.last_error }}</p>{% endif %}</td>
+          <td>{% for svc in env.services %}<div>{{ svc.name }}: {{ svc.ref }} → <code>{{ svc.commit }}</code></div>{% endfor %}</td>
+          <td>{% if env.entry_url and (env.entry_url.startswith('https://') or env.entry_url.startswith('http://')) %}<a href="{{ env.entry_url }}" target="_blank" rel="noopener noreferrer">환경 열기</a>{% else %}—{% endif %}</td>
+          <td>{{ env.ttl or '—' }}</td><td><button type="button" class="delete" data-env="{{ env.name }}" {% if not enabled %}disabled{% endif %}>삭제</button></td>
+        </tr>
+        {% else %}<tr><td colspan="6" class="muted">아직 환경이 없습니다.</td></tr>{% endfor %}
+      </tbody>
+    </table></div>
+  </section>
+  <section aria-labelledby="create-title">
+    <h2 id="create-title">환경 만들기</h2>
+    {% if not enabled %}<p class="error">공개 접근 설정이 없어 환경을 변경할 수 없습니다.</p>{% endif %}
+    <form id="create-form">
+      <div class="fields">
+        {% for svc in catalog %}
+        <label>{{ svc.name }}
+          <select data-service="{{ svc.name }}">
+            {% if svc.include != 'always' %}<option value="">포함 안 함</option>{% endif %}
+            <option value="{{ svc.default_ref }}">{{ svc.default_ref }} (default)</option>
+            {% for branch in svc.branches %}{% if branch.name != svc.default_ref %}<option value="{{ branch.name }}">{{ branch.name }}</option>{% endif %}{% endfor %}
+            {% for pr in svc.prs %}<option value="pr-{{ pr.number }}">PR #{{ pr.number }} — {{ pr.title }}</option>{% endfor %}
+          </select>
+          {% if svc.error %}<small class="error">{{ svc.error }}</small>{% endif %}
+        </label>
+        {% endfor %}
+        <label>환경 이름 (선택)<input name="name" placeholder="비우면 자동 생성" pattern="[a-z][a-z0-9-]{1,30}" maxlength="31"></label>
+        <label>TTL (선택)<input name="ttl" placeholder="예: 2h, 1d" pattern="[1-9][0-9]*[smhd]"></label>
+      </div>
+      <button id="create-button" type="submit" {% if not enabled %}disabled{% endif %}>환경 만들기</button>
+    </form>
+  </section>
+</main>
+<script>
+(() => {
+  const enabled = {{ enabled | tojson }};
+  const terminal = new Set(['READY', 'FAILED', 'DELETED']);
+  const rows = document.getElementById('environments');
+  const message = document.getElementById('message');
+  let timer;
+  const pending = new Map();
+  function node(tag, text, className) {
+    const element = document.createElement(tag);
+    if (text !== undefined) element.textContent = text;
+    if (className) element.className = className;
+    return element;
+  }
+  async function api(path, method = 'GET', body) {
+    const response = await fetch(path, {method, headers: method === 'GET' ? {} : {'Content-Type':'application/json'}, body: body === undefined ? undefined : JSON.stringify(body)});
+    if (!response.ok) {
+      let detail;
+      try { detail = (await response.json()).error; } catch { detail = '요청을 처리하지 못했습니다.'; }
+      throw new Error(detail || `요청 실패 (${response.status})`);
+    }
+    return response.json();
+  }
+  function schedule(active) {
+    clearTimeout(timer);
+    if (active) timer = setTimeout(refresh, 5000);
+  }
+  async function refresh() {
+    try {
+      const environments = await api('/api/environments');
+      rows.replaceChildren();
+      for (const env of environments) {
+        const tr = node('tr');
+        tr.append(node('td', env.name));
+        const state = node('td'); state.append(node('span', env.state, 'badge'));
+        if (env.last_error) state.append(node('p', env.last_error, 'error'));
+        tr.append(state);
+        const services = node('td');
+        for (const svc of env.services) services.append(node('div', `${svc.name}: ${svc.ref} → ${svc.commit}`));
+        tr.append(services);
+        const url = node('td', '—');
+        if (env.entry_url && /^https?:\/\//i.test(env.entry_url)) {
+          const link = node('a', '환경 열기'); link.href = env.entry_url; link.target = '_blank'; link.rel = 'noopener noreferrer'; url.replaceChildren(link);
+        }
+        tr.append(url, node('td', env.ttl || '—'));
+        const actions = node('td'); const button = node('button', '삭제', 'delete');
+        button.type = 'button'; button.dataset.env = env.name; button.disabled = !enabled || pending.has(env.name);
+        actions.append(button); tr.append(actions); rows.append(tr);
+      }
+      for (const [name, operation] of pending) {
+        const env = environments.find(e => e.name === name);
+        if ((operation.action === 'up' && env) || (operation.action === 'down' && (!env || env.state === 'DELETING')) || Date.now() > operation.deadline) pending.delete(name);
+      }
+      if (!environments.length) { const tr = node('tr'); const td = node('td', '아직 환경이 없습니다.', 'muted'); td.colSpan = 6; tr.append(td); rows.append(tr); }
+      schedule(pending.size > 0 || environments.some(e => !terminal.has(e.state)));
+    } catch (error) { message.textContent = error.message; schedule(true); }
+  }
+  rows.addEventListener('click', async event => {
+    const button = event.target.closest('button[data-env]');
+    if (!button || button.disabled || !confirm(`${button.dataset.env} 환경을 삭제할까요?`)) return;
+    button.disabled = true;
+    try {
+      const result = await api(`/api/environments/${encodeURIComponent(button.dataset.env)}`, 'DELETE');
+      pending.set(result.name, {action:'down', deadline:Date.now() + 60000});
+      message.textContent = `${result.name} 삭제 요청 접수`; await refresh();
+    } catch (error) { message.textContent = error.message; button.disabled = false; }
+  });
+  document.getElementById('create-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    const button = document.getElementById('create-button');
+    if (button.disabled) return;
+    button.disabled = true; button.textContent = '생성 요청 중…';
+    const data = new FormData(event.target); const body = {services:{}};
+    for (const select of event.target.querySelectorAll('[data-service]')) if (select.value) body.services[select.dataset.service] = select.value;
+    if (data.get('name')) body.name = data.get('name');
+    if (data.get('ttl')) body.ttl = data.get('ttl');
+    try {
+      const result = await api('/api/environments', 'POST', body);
+      pending.set(result.name, {action:'up', deadline:Date.now() + 60000});
+      message.textContent = `${result.name} 생성 요청 접수`; await refresh();
+    } catch (error) { message.textContent = error.message; }
+    finally { button.disabled = !enabled; button.textContent = '환경 만들기'; }
+  });
+  document.getElementById('refresh').addEventListener('click', refresh);
+  schedule([...rows.querySelectorAll('[data-state]')].some(row => !terminal.has(row.dataset.state)));
+})();
+</script>
+</body></html>

@@ -403,3 +403,43 @@ share that origin. Local URLs remain in descriptors as `localUrl`. Every public
 route verifies an Access JWT at the hub; absent verifier configuration fails
 closed. `/healthz` is the only unauthenticated HTTP endpoint. This unit supplies
 the authenticated HTTP foundation; dashboard routes are added separately.
+
+## Dashboard
+
+With public access configured (see Public access), open
+`https://<public_access.dashboard_host>`. Cloudflare Access signs you in; the hub
+verifies the JWT on every dashboard and API request and shows your email.
+
+Choose a default ref, branch, or open same-repository PR per service, optionally
+enter a name and TTL (for example `2h`), and select **환경 만들기**. Names default to
+`c-` plus six lowercase base32 characters. The environment table shows states,
+requested refs, 12-character pinned commits, entry links, expiry times and failure
+summaries. It polls every five seconds while work is in progress. **삭제** asks for
+confirmation; **새로고침** refreshes environments changed elsewhere.
+
+The JSON API uses the same Access authentication:
+
+- `GET /api/catalog`: service defaults, branches and non-fork open PRs, cached per
+  repository for 60 seconds. A repository failure adds an `error` to its services.
+- `GET /api/environments`: active registry entries, without lifecycle reconciliation.
+- `GET /api/environments/{name}`: one entry; `?format=descriptor` uses the same
+  descriptor implementation as `phub status --format descriptor`.
+- `POST /api/environments`: `{ "services": { "backend": "pr-4" }, "ttl": "2h" }`,
+  with optional `name`.
+- `POST /api/environments/{name}/update`: `{ "services": { "backend": "main" } }`.
+- `DELETE /api/environments/{name}`: delete an environment.
+
+Mutations require the exact dashboard HTTPS Origin; POST requests require
+`Content-Type: application/json`. Without `public_access`, mutations are refused.
+The browser supplies Origin automatically. Mutations run detached CLI children
+with `requested_by=web:<verified email>`, preserving CLI locks and capacity guards.
+An exit within two seconds maps codes 2/3/4/5 to HTTP 400/409/429/500 and returns
+only the final stderr line; otherwise the API returns `202 {"name": "..."}`.
+A 202 acknowledges the command, not environment readiness. Each submission is a
+new operation; automatic retries are not deduplicated.
+
+Child stdout/stderr stay in separate per-operation files under
+`$PHUB_STATE_DIR/logs/web/<operation>/` (default `/state/logs/web/`). The server logs
+one mutation summary with email, action, environment and the early exit code
+(`null` if still running or no child was started). Requests refused before a child
+starts include a `rejected` reason and `exit_code: null`. No JWT or token is logged.

@@ -88,6 +88,27 @@ def descriptor(
     return validate("environment-descriptor", result)
 
 
+def environment_descriptor(ctx: Context, result: dict[str, Any]) -> dict[str, Any]:
+    local_urls: dict[str, str] | None = None
+    entry_service = "frontend"
+    if access := ctx.catalog.public_access:
+        entry_service = access.entry_service
+        local_urls = {}
+        for service in result["services"]:
+            manifest = ctx.git.read_manifest(service["repo"], service["commit_sha"])
+            if manifest.expose:
+                local_urls[service["service"]] = ctx.catalog.public_url_template.format(
+                    env=result["name"],
+                    subdomain=manifest.expose["subdomain"],
+                )
+    return descriptor(
+        result,
+        ctx.catalog.public_url_template,
+        local_urls,
+        entry_service,
+    )
+
+
 def config_override(config: dict[str, Any], env: str, key: str, default: str) -> str:
     value = os.environ.get(env) or config.get(key)
     return default if value is None else str(value)
@@ -173,6 +194,8 @@ def parser() -> argparse.ArgumentParser:
         )
         if command not in {"list", "gc"}:
             sub.add_argument("name", nargs="?" if command == "up" else None)
+        if command in {"up", "update", "down"}:
+            sub.add_argument("--requested-by", help=argparse.SUPPRESS)
         if command in {"up", "update"}:
             sub.add_argument("--set", dest="refs", action="append", default=[])
         if command == "up":
@@ -201,9 +224,13 @@ def main(argv: list[str] | None = None, context: Context | None = None) -> int:
         if args.command == "serve":
             from .web.server import serve
 
-            serve(lambda: main(["gc", "--format", "json"], ctx), args.interval)
+            serve(
+                lambda: main(["gc", "--format", "json"], ctx),
+                args.interval,
+                context=ctx,
+            )
             return 0
-        actor = f"cli:{getpass.getuser()}"
+        actor = getattr(args, "requested_by", None) or f"cli:{getpass.getuser()}"
         refs: dict[str, str] = {}
         for value in getattr(args, "refs", []):
             key, sep, ref = value.partition("=")
@@ -276,28 +303,7 @@ def main(argv: list[str] | None = None, context: Context | None = None) -> int:
             if not isinstance(result, dict) or "services" not in result:
                 raise InvalidInput("Descriptor format requires one environment")
             result = cast(dict[str, Any], result)
-            local_urls: dict[str, str] | None = None
-            entry_service = "frontend"
-            if access := ctx.catalog.public_access:
-                entry_service = access.entry_service
-                local_urls = {}
-                for service in result["services"]:
-                    manifest = ctx.git.read_manifest(
-                        service["repo"], service["commit_sha"]
-                    )
-                    if manifest.expose:
-                        local_urls[service["service"]] = (
-                            ctx.catalog.public_url_template.format(
-                                env=result["name"],
-                                subdomain=manifest.expose["subdomain"],
-                            )
-                        )
-            result = descriptor(
-                cast(dict[str, Any], result),
-                ctx.catalog.public_url_template,
-                local_urls,
-                entry_service,
-            )
+            result = environment_descriptor(ctx, result)
         if args.format in {"json", "descriptor"}:
             print(json.dumps(result, indent=2))
         elif isinstance(result, dict):

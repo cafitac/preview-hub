@@ -16,6 +16,8 @@ from starlette.routing import Route
 from starlette.types import ASGIApp
 
 from ..access import AccessDenied, AccessVerifier, Identity
+from ..lifecycle import Context
+from .dashboard import Dashboard
 
 
 class AccessMiddleware(BaseHTTPMiddleware):
@@ -55,6 +57,7 @@ def create_app(
     *,
     gc: Callable[[], object] | None = None,
     interval: float = 900,
+    dashboard: Dashboard | None = None,
 ) -> Starlette:
     @asynccontextmanager
     async def lifespan(app: Starlette) -> AsyncGenerator[None]:
@@ -86,7 +89,11 @@ def create_app(
                 await run_in_threadpool(thread.join)
 
     return Starlette(
-        routes=[Route("/healthz", ok), Route("/auth/verify", ok)],
+        routes=[
+            Route("/healthz", ok),
+            Route("/auth/verify", ok),
+            *(dashboard or Dashboard()).routes(),
+        ],
         middleware=[
             Middleware(AccessMiddleware, verifier=verifier or AccessVerifier())
         ],
@@ -94,9 +101,11 @@ def create_app(
     )
 
 
-def serve(gc: Callable[[], object], interval: float) -> None:
+def serve(
+    gc: Callable[[], object], interval: float, *, context: Context | None = None
+) -> None:
     uvicorn.run(
-        create_app(gc=gc, interval=interval),
+        create_app(gc=gc, interval=interval, dashboard=Dashboard(context)),
         host="0.0.0.0",
         port=int(os.environ.get("PHUB_HTTP_PORT", "8080")),
     )

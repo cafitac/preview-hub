@@ -41,7 +41,8 @@ def test_serve_runs_gc_before_wait(ctx, monkeypatch):
         "preview_hub.cli.ExpireEnvironments.execute", lambda self: calls.append("gc")
     )
 
-    def stop(gc, seconds):
+    def stop(gc, seconds, *, context):
+        assert context is ctx
         gc()
         calls.append(seconds)
         raise KeyboardInterrupt
@@ -94,7 +95,8 @@ def test_invalid_gc_interval_is_serve_input_error(monkeypatch, capsys):
 def test_serve_gc_interval_resolution(ctx, monkeypatch, args, env, expected):
     monkeypatch.setenv("PHUB_GC_INTERVAL", env)
 
-    def stop(gc, seconds):
+    def stop(gc, seconds, *, context):
+        assert context is ctx
         assert seconds == expected
         raise KeyboardInterrupt
 
