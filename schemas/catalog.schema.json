@@ -63,6 +63,30 @@
         "max_ttl"
       ],
       "additionalProperties": false
+    },
+    "public_access": {
+      "type": "object",
+      "properties": {
+        "host_template": {
+          "type": "string"
+        },
+        "entry_service": {
+          "type": "string"
+        },
+        "path_template": {
+          "type": "string"
+        },
+        "dashboard_host": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "host_template",
+        "entry_service",
+        "path_template",
+        "dashboard_host"
+      ],
+      "additionalProperties": false
     }
   },
   "required": [

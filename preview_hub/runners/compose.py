@@ -84,16 +84,47 @@ def render(plan: EnvironmentPlan) -> dict[str, Any]:
         labels["dev.phub.role"] = "service"
         labels["dev.phub.health"] = json.dumps(_plain(service.manifest.health))
         labels["dev.phub.port"] = str(service.port)
+        route = f"{plan.env}-{service.name}"
         if service.public_url:
-            route = f"{plan.env}-{service.name}"
             labels.update(
                 {
                     "traefik.enable": "true",
                     "traefik.docker.network": network,
-                    f"traefik.http.routers.{route}.rule": f"Host(`{urlsplit(service.public_url).hostname}`)",
+                    f"traefik.http.routers.{route}.rule": f"Host(`{urlsplit(service.local_url or service.public_url).hostname}`)",
                     f"traefik.http.routers.{route}.service": route,
                     f"traefik.http.services.{route}.loadbalancer.server.port": str(
                         service.port
+                    ),
+                }
+            )
+        if service.local_url and service.public_url:
+            public_route = f"{route}-public"
+            auth = f"{public_route}-auth"
+            url = urlsplit(service.public_url)
+            rule = f"Host(`{url.hostname}`)"
+            middlewares = [auth]
+            labels[f"traefik.http.middlewares.{auth}.forwardauth.address"] = (
+                "http://phub-hub:8080/auth/verify"
+            )
+            labels[
+                f"traefik.http.middlewares.{auth}.forwardauth.trustForwardHeader"
+            ] = "false"
+            if url.path:
+                rule += f" && (Path(`{url.path}`) || PathPrefix(`{url.path}/`))"
+                strip = f"{public_route}-strip"
+                middlewares.append(strip)
+                labels[f"traefik.http.middlewares.{strip}.stripprefix.prefixes"] = (
+                    url.path
+                )
+            labels.update(
+                {
+                    f"traefik.http.routers.{public_route}.rule": rule,
+                    f"traefik.http.routers.{public_route}.service": route,
+                    f"traefik.http.routers.{public_route}.priority": "100"
+                    if url.path
+                    else "10",
+                    f"traefik.http.routers.{public_route}.middlewares": ",".join(
+                        middlewares
                     ),
                 }
             )

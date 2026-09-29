@@ -341,3 +341,65 @@ posting, the bot searches all comments on that PR for its own
 creating duplicates. Removed comments stay as history; reusing an environment
 name creates a fresh comment. The existing token needs Issues/Pull requests write
 permission.
+
+## Public access (Cloudflare, free)
+
+Public access is optional. Without `public_access` in the catalog, existing local
+URLs and routing stay unchanged. The hub and tunnel publish no host ports; local
+SSH-forward debugging still uses the proxy's loopback port 18080.
+
+1. On any machine with cloudflared, authenticate to your Cloudflare account and
+   run `cloudflared tunnel create preview-hub`. Keep the resulting credentials
+   JSON private; the hub needs no Cloudflare API token.
+2. In your Cloudflare zone, create proxied CNAME records `preview-hub` and `*`,
+   both pointing to `<tunnel-id>.cfargotunnel.com`. Existing explicit records
+   (such as `gather` and `interview`) take precedence over the wildcard.
+3. Create one Access self-hosted application with destinations
+   `preview-hub.cafitac.com` and `phub-*.cafitac.com`, with an Allow policy for
+   your owner email. Copy its AUD tag and your team domain (for example,
+   `example.cloudflareaccess.com`, without `https://`).
+4. Install the credentials from your terminal with
+   `scripts/tunnel-credentials < /path/to/credentials.json`. Alternatively run
+   the script and paste the JSON into its hidden stdin prompt. It writes only
+   `/opt/phub/secrets/tunnel.json` inside the dedicated VM, mode 0400.
+   `scripts/tunnel-credentials --check` reports presence only.
+5. Create `/opt/phub/public.env` **inside the preview-hub VM** with these
+   non-secret values:
+
+   ```dotenv
+   PHUB_ACCESS_TEAM_DOMAIN=example.cloudflareaccess.com
+   PHUB_ACCESS_AUD=your-application-aud-tag
+   PHUB_TUNNEL_ID=your-tunnel-uuid
+   ```
+
+6. Commit this optional block to `deploy/hub-stack/catalog.yaml` in the ref
+   being deployed. Do not edit only `/opt/phub/catalog.yaml` inside the VM:
+   every bootstrap run overwrites that file with the catalog from the
+   deployed ref.
+
+   ```yaml
+   public_access:
+     host_template: phub-{env}.cafitac.com
+     entry_service: frontend
+     path_template: /_svc/{subdomain}
+     dashboard_host: preview-hub.cafitac.com
+   ```
+
+7. Run the existing `scripts/vm-bootstrap.sh <ref>` deployment procedure. It
+   starts the `public` profile only if both VM files exist. Compose reads
+   `public.env` with `--env-file` and passes the tunnel ID as the final argument
+   of `tunnel ... run <TUNNEL_ID>`: cloudflared does **not** substitute environment
+   variables in YAML. The checked-in `cloudflared.yml` intentionally has no
+   `tunnel:` field. It routes the dashboard directly to the hub and other zone
+   hosts to Traefik, with a final 404 rule. If using another zone, update its
+   two hostname rules as well as the catalog.
+8. Update existing environments with their current refs (for example,
+   `phub update demo --set backend=main`) to apply public routes and injected
+   URLs even when the commits have not changed.
+
+The entry service uses `https://phub-<env>.cafitac.com`; other exposed services
+use paths such as `/_svc/api`, stripped before forwarding. Injected public URLs
+share that origin. Local URLs remain in descriptors as `localUrl`. Every public
+route verifies an Access JWT at the hub; absent verifier configuration fails
+closed. `/healthz` is the only unauthenticated HTTP endpoint. This unit supplies
+the authenticated HTTP foundation; dashboard routes are added separately.

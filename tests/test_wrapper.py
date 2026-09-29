@@ -70,7 +70,8 @@ def test_shell_syntax():
 
 
 @pytest.mark.parametrize("source_mode", [False, True])
-def test_bootstrap_remote_execution(tmp_path, source_mode):
+@pytest.mark.parametrize("public_files", ["both", "credentials-only", "neither"])
+def test_bootstrap_remote_execution(tmp_path, source_mode, public_files):
     import tarfile
 
     source = tmp_path / "source with spaces"
@@ -92,6 +93,8 @@ printf '%s\\n' "$*" >> "$CALLS"
 case "$1" in
 status) exit 1;;
 ssh) case "$*" in
+    *"test -f /opt/phub/secrets/tunnel.json") [ "$PUBLIC_FILES" != neither ];;
+    *"test -f /opt/phub/public.env") [ "$PUBLIC_FILES" = both ];;
     *mktemp*) echo /tmp/phub-build.test;;
     *"id -u") echo 501;;
     *"id -g") echo 20;;
@@ -107,12 +110,14 @@ esac
         "PATH": f"{tmp_path}:{os.environ['PATH']}",
         "PHUB_REMOTE_PATH": f"{tmp_path}:/usr/bin:/bin",
         "PHUB_REMOTE_DOCKER": str(docker),
+        "PUBLIC_FILES": public_files,
         "CAPTURE": str(tmp_path / "archive"),
         "CALLS": str(tmp_path / "calls"),
     }
     args = ["--source-dir", str(source)] if source_mode else ["feature/ref", "repo url"]
     subprocess.run(["sh", "scripts/vm-bootstrap.sh", *args], env=env, check=True)
     calls = (tmp_path / "calls").read_text()
+    assert ("--profile public up -d" in calls) is (public_files == "both")
     assert "--activate=false" in calls
     assert (
         calls.splitlines()[-1]
