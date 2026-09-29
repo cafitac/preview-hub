@@ -171,8 +171,8 @@ def main(argv: list[str] | None = None, context: Context | None = None) -> int:
         if args.command == "serve":
             if args.interval is None:
                 args.interval = float(os.environ.get("PHUB_GC_INTERVAL", "900"))
-            if args.interval <= 0:
-                raise InvalidInput("GC interval must be positive")
+            if not math.isfinite(args.interval) or args.interval <= 0:
+                raise InvalidInput("GC interval must be finite and positive")
         ctx = context or create_context()
         if args.command == "serve":
             while True:

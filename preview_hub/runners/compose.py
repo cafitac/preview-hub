@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+import re
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -396,7 +398,17 @@ class ComposeRunner:
             for info in sorted(images, key=lambda i: i["Created"], reverse=True)[
                 keep_per_service:
             ]:
-                if not retained.intersection(info.get("RepoTags") or []):
-                    self._docker("image", "rm", info["Id"])
-                    removed.append(info["Id"])
+                for tag in cast(list[str], info.get("RepoTags") or []):
+                    if tag in retained or not re.fullmatch(
+                        r"phub/[^/:]+:[0-9a-f]{12}", tag
+                    ):
+                        continue
+                    try:
+                        self._docker("image", "rm", tag)
+                    except OSError as exc:
+                        logging.getLogger(__name__).warning(
+                            "Failed to remove image tag %s: %s", tag, exc
+                        )
+                        continue
+                    removed.append(tag)
         return tuple(removed)

@@ -325,14 +325,16 @@ def test_gc_preserves_active_and_recent_images(tmp_path):
             [
                 {
                     "Id": name,
-                    "RepoTags": [f"phub/backend:{name}"],
+                    "RepoTags": [f"phub/backend:{index:012x}"],
                     "Created": str(index),
                     "Config": {"Labels": {"dev.phub.service": "backend"}},
                 }
             ]
         )
-    assert runner.gc_images({"phub/backend:one"}) == ("two",)
-    assert ["docker", "image", "rm", "two"] in docker.calls
+    assert runner.gc_images({"phub/backend:000000000000"}) == (
+        "phub/backend:000000000001",
+    )
+    assert ["docker", "image", "rm", "phub/backend:000000000001"] in docker.calls
 
 
 def test_timeout_reports_stderr(tmp_path):
@@ -396,3 +398,66 @@ def test_environment_apply_failure_has_no_service(plan, tmp_path, failure):
         if failure == "network"
         else "Expected one managed phub-proxy"
     ) in result.log_excerpt
+
+
+@pytest.mark.parametrize("retain_first", [True, False])
+def test_gc_removes_stale_tags_from_shared_image(tmp_path, retain_first):
+    docker = Docker()
+    runner = ComposeRunner(tmp_path, executor=docker)
+    tags = ["phub/backend:aaaaaaaaaaaa", "phub/backend:bbbbbbbbbbbb"]
+    docker.responses[
+        ("image", "ls", "-q", "--filter", "label=dev.phub.managed=true")
+    ] = "shared"
+    docker.responses[("image", "inspect", "shared")] = json.dumps(
+        [
+            {
+                "Id": "shared",
+                "RepoTags": [*tags, "other:latest", "phub/backend:latest"],
+                "Created": "1",
+                "Config": {"Labels": {"dev.phub.service": "backend"}},
+            }
+        ]
+    )
+    retained = {tags[0]} if retain_first else set()
+    expected = tags[1:] if retain_first else tags
+    assert runner.gc_images(retained, keep_per_service=0) == tuple(expected)
+    assert [call for call in docker.calls if call[1:3] == ["image", "rm"]] == [
+        ["docker", "image", "rm", tag] for tag in expected
+    ]
+
+
+def test_gc_logs_failed_tag_removal_and_continues(tmp_path, caplog):
+    docker = Docker()
+    runner = ComposeRunner(tmp_path, executor=docker)
+    tags = [f"phub/backend:{index:012x}" for index in range(3)]
+    docker.responses[
+        ("image", "ls", "-q", "--filter", "label=dev.phub.managed=true")
+    ] = "shared other"
+    for ident, repo_tags, created in [
+        ("shared", tags[:2], "2"),
+        ("other", tags[2:], "1"),
+    ]:
+        docker.responses[("image", "inspect", ident)] = json.dumps(
+            [
+                {
+                    "Id": ident,
+                    "RepoTags": repo_tags,
+                    "Created": created,
+                    "Config": {"Labels": {"dev.phub.service": "backend"}},
+                }
+            ]
+        )
+
+    def fail_first(args, timeout):
+        result = docker(args, timeout)
+        if args[1:] == ["image", "rm", tags[0]]:
+            return subprocess.CompletedProcess(args, 1, "", "image in use")
+        return result
+
+    runner.executor = fail_first
+    assert runner.gc_images(set(), keep_per_service=0) == tuple(tags[1:])
+    assert tags[0] in caplog.text
+    assert "image in use" in caplog.text
+    assert [call for call in docker.calls if call[1:3] == ["image", "rm"]] == [
+        ["docker", "image", "rm", tag] for tag in tags
+    ]

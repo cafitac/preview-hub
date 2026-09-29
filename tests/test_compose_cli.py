@@ -120,3 +120,21 @@ def test_invalid_health_interval_does_not_affect_fake_context(tmp_path, monkeypa
     monkeypatch.setenv("PHUB_CATALOG", "deploy/hub-stack/catalog.yaml")
     monkeypatch.setenv("PHUB_HEALTH_POLL_INTERVAL", "2s")
     assert create_context().poll_interval == 0.1
+
+
+@pytest.mark.parametrize("interval", ["nan", "inf", "-inf", "-1", "0"])
+@pytest.mark.parametrize("source", ["argument", "environment"])
+def test_serve_rejects_nonpositive_or_nonfinite_interval_before_loop(
+    ctx, monkeypatch, capsys, interval, source
+):
+    def unexpected(*args, **kwargs):
+        pytest.fail("Invalid interval must be rejected before GC or sleep")
+
+    monkeypatch.setattr("preview_hub.cli.ExpireEnvironments.execute", unexpected)
+    monkeypatch.setattr("preview_hub.cli.time.sleep", unexpected)
+    monkeypatch.setenv(
+        "PHUB_GC_INTERVAL", interval if source == "environment" else "900"
+    )
+    args = [f"--interval={interval}"] if source == "argument" else []
+    assert main(["serve", *args], ctx) == 2
+    assert "finite and positive" in capsys.readouterr().err
