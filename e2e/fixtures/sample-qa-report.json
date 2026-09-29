@@ -1,0 +1,15 @@
+{
+  "apiVersion": "preview-hub/v1",
+  "kind": "QaReport",
+  "environment": "sample-env",
+  "commits": {"backend": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+  "startedAt": "2026-09-29T10:00:00Z",
+  "finishedAt": "2026-09-29T10:01:00Z",
+  "scenarios": [{
+    "id": "create-note",
+    "status": "PASSED",
+    "summary": "Synthetic schema example, not a live QA result.",
+    "evidence": [{"type": "http", "uri": "http://api.sample-env.localhost:18080/api/notes"}]
+  }],
+  "summary": {"passed": 1, "failed": 0, "skipped": 0}
+}
