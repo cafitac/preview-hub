@@ -16,8 +16,17 @@ class SyntheticVerifier(AccessVerifier):
         raise AccessDenied("missing")
 
 
-def test_auth_boundary_and_identity():
-    app = create_app(SyntheticVerifier())
+def test_auth_boundary_and_identity(ctx):
+    from preview_hub.web.dashboard import Dashboard
+
+    class EmptyGitHub:
+        def list_branches(self, repo):
+            return []
+
+        def list_open_prs(self, repo):
+            return []
+
+    app = create_app(SyntheticVerifier(), dashboard=Dashboard(ctx, EmptyGitHub()))
     app.router.routes.append(
         Route("/identity", lambda request: PlainTextResponse(identity(request).email))
     )
@@ -29,7 +38,7 @@ def test_auth_boundary_and_identity():
         headers = {"Cf-Access-Jwt-Assertion": "synthetic-valid"}
         assert client.get("/auth/verify", headers=headers).status_code == 200
         assert client.get("/identity", headers=headers).text == "owner@example.com"
-        assert client.get("/", headers=headers).status_code == 404
+        assert client.get("/", headers=headers).status_code == 200
         assert client.post("/healthz").status_code == 401
 
 
