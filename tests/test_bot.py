@@ -52,6 +52,7 @@ class Api:
                 "user": {"login": "owner"},
                 "author_association": "OWNER",
                 "updated_at": NOW.isoformat(),
+                "created_at": NOW.isoformat(),
             }
         ]
         self.pr = copy.deepcopy(PR)
@@ -893,3 +894,57 @@ def test_nonretryable_pr_read_retains_failed_claim_behavior(rig):
     assert len(ledger.rows(("FAILED",))) == 1
     assert not runner.calls
     assert len(api.posts) == 1
+
+
+@pytest.mark.parametrize("restart", [False, True])
+def test_edited_comment_created_before_floor_is_never_executed(rig, catalog, restart):
+    bot, api, runner, ledger = rig
+    api.comments[0].update(
+        body="ordinary comment",
+        created_at=(NOW - timedelta(minutes=5)).isoformat(),
+    )
+    bot.poll()
+    api.comments[0].update(
+        body="/preview down", updated_at=(NOW + timedelta(minutes=1)).isoformat()
+    )
+    if restart:
+        bot = PollingBot(
+            catalog,
+            api,
+            Executor(runner),
+            Ledger(Registry(ledger.registry.state_dir)),
+            clock=lambda: NOW + timedelta(minutes=1),
+        )
+    bot.poll()
+    assert not runner.calls
+    assert not ledger.contains(100)
+
+
+@pytest.mark.parametrize("offset,eligible", [(-61, False), (-60, True), (-59, True)])
+def test_persisted_cursor_floor_boundary(rig, offset, eligible):
+    bot, api, runner, ledger = rig
+    ledger.cursor(REPO, NOW.isoformat())
+    api.comments[0]["created_at"] = (NOW + timedelta(seconds=offset)).isoformat()
+    bot.poll()
+    assert bool(runner.calls) is eligible
+
+
+def test_reply_query_excludes_acknowledged_rows_in_sql(rig, monkeypatch):
+    bot, api, _runner, ledger = rig
+    for comment_id, status in enumerate(("DONE", "FAILED", "REJECTED"), 1):
+        for identifier in (comment_id, comment_id + 10):
+            ledger.receive(identifier, REPO, 42, "owner", "/preview", NOW.isoformat())
+            ledger.finish(identifier, status, "reply", NOW.isoformat())
+        ledger.replied(comment_id, 900 + comment_id)
+    original = ledger.rows
+    selected = []
+
+    def rows(statuses, *, unreplied=False):
+        result = original(statuses, unreplied=unreplied)
+        selected.extend(row["comment_id"] for row in result)
+        return result
+
+    monkeypatch.setattr(ledger, "rows", rows)
+    bot.replies()
+    assert selected == [11, 12, 13]
+    assert len(api.posts) == 3

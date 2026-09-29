@@ -37,7 +37,7 @@ class PollingBot:
         self.ledger = ledger
         self.clock = clock
         self.started_at = clock().astimezone(UTC).isoformat()
-        self.comment_floors: dict[str, datetime | None] = {}
+        self.comment_floors: dict[str, datetime] = {}
         self.closed_retries: dict[str, set[str]] = {}
         self.closed_retry_limit = 1000
 
@@ -179,10 +179,8 @@ class PollingBot:
                 )
 
     def replies(self) -> None:
-        for row in self.ledger.rows(("DONE", "FAILED", "REJECTED")):
-            if row["reply_comment_id"] is not None or not self.ledger.claim_reply(
-                row["comment_id"], self.clock().timestamp()
-            ):
+        for row in self.ledger.rows(("DONE", "FAILED", "REJECTED"), unreplied=True):
+            if not self.ledger.claim_reply(row["comment_id"], self.clock().timestamp()):
                 continue
             body = self.ledger.initial_replies.get(row["comment_id"])
             if body is None:
@@ -238,7 +236,9 @@ class PollingBot:
             try:
                 if repo not in self.comment_floors:
                     self.comment_floors[repo] = (
-                        None
+                        datetime.fromisoformat(
+                            overlap(self.ledger.cursor(repo, self.started_at)[0])
+                        )
                         if self.ledger.has_cursor(repo)
                         else datetime.fromisoformat(self.started_at)
                     )
@@ -260,11 +260,8 @@ class PollingBot:
                         ),
                     ):
                         try:
-                            created = comment.get("created_at") or comment["updated_at"]
-                            if (
-                                floor is not None
-                                and datetime.fromisoformat(created) < floor
-                            ):
+                            created = comment["created_at"]
+                            if datetime.fromisoformat(created) < floor:
                                 continue
                             self.handle(repo, comment)
                         except GitHubError:

@@ -58,14 +58,18 @@ class Ledger:
             )
         self.initial_replies[comment_id] = reply
 
-    def rows(self, statuses: tuple[str, ...]) -> list[dict[str, Any]]:
+    def rows(
+        self, statuses: tuple[str, ...], *, unreplied: bool = False
+    ) -> list[dict[str, Any]]:
         with self.registry.transaction() as db:
             return [
                 dict(row)
                 for row in db.execute(
                     "SELECT * FROM bot_comments WHERE status IN ("
                     + ",".join("?" for _ in statuses)
-                    + ") ORDER BY comment_id",
+                    + ")"
+                    + (" AND reply_comment_id IS NULL" if unreplied else "")
+                    + " ORDER BY comment_id",
                     statuses,
                 )
             ]

@@ -3,6 +3,7 @@ set -eu
 # Disable tracing even if invoked with sh -x. The token is only ever stdin data.
 set +x
 quote() { printf "'"; printf '%s' "$1" | sed "s/'/'\\\\''/g"; printf "'"; }
+uid_gid=${PHUB_UID_GID:-0:0}
 host=${PHUB_SSH_HOST:-trading-macstudio}
 remote_path=${PHUB_REMOTE_PATH:-/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin}
 case ${1:-} in
@@ -24,17 +25,18 @@ if [ "$1" = check ]; then
 fi
 umask 077
 mkdir -p /opt/phub/secrets
+chown "$2" /opt/phub/secrets
 chmod 0700 /opt/phub/secrets
 tmp=$(mktemp /opt/phub/secrets/.github_token.XXXXXX)
 trap 'rm -f "$tmp"' 0 HUP INT TERM
 cat > "$tmp"
 [ -s "$tmp" ] || { echo 'token missing' >&2; exit 2; }
-chown 0:0 "$tmp"
+chown "$2" "$tmp"
 chmod 0400 "$tmp"
 mv -f "$tmp" "$file"
 VM
 )
-command="export PATH=$(quote "$remote_path"); colima ssh --profile preview-hub -- sudo -n sh -c $(quote "$vm_script") sh $(quote "$mode")"
+command="export PATH=$(quote "$remote_path"); colima ssh --profile preview-hub -- sudo -n sh -c $(quote "$vm_script") sh $(quote "$mode") $(quote "$uid_gid")"
 if [ "$mode" = check ]; then
     exec ssh ${PHUB_SSH_OPTS:-} -T "$host" "$command" < /dev/null
 fi

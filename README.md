@@ -106,8 +106,11 @@ The image defaults to UID 1000. The stack explicitly uses root because Colima's
 Docker socket is normally root-owned. The hub and bot use the same UID/GID.
 To run both as UID 1000, grant their GID socket access and make both named volumes writable, then set
 `PHUB_UID_GID=1000:<socket-gid>` when starting the stack. Socket access grants
-control of the dedicated VM regardless of UID. The bot token file must also be
-readable by that UID. Both services need socket access and writable volumes.
+control of the dedicated VM regardless of UID. Use the same `PHUB_UID_GID` when
+running `scripts/vm-bootstrap.sh` and every `scripts/bot-token` install or rotation.
+Both scripts set the secrets directory owner to that UID/GID (default `0:0`)
+with mode `0700`; the token installer sets the token owner to it with mode `0400`.
+Both services need socket access and writable volumes.
 Traefik has a read-only socket mount, Docker-provider ownership constraint, and opt-in routing labels.
 
 Application and init containers use the manifest memory limit; PostgreSQL uses
@@ -231,9 +234,11 @@ its secure source into `scripts/bot-token` (never put the value in an argument),
 or run `scripts/bot-token`, paste it at the hidden stdin prompt, and press Ctrl-D.
 Run `scripts/bot-token --check` to check presence without reading its contents.
 The installer uses `PHUB_SSH_HOST`, `PHUB_SSH_OPTS`, and `PHUB_REMOTE_PATH` like
-`scripts/phub`, and writes only inside the `preview-hub` VM, as root, mode 0400,
+`scripts/phub`, and writes only inside the `preview-hub` VM, using sudo, mode 0400,
 at `/opt/phub/secrets/github_token`. Bootstrap creates `/opt/phub/secrets`
-with mode 0700 if missing; Compose mounts that directory read-only at `/run/secrets`.
+with mode 0700. Both directory and installed token are owned by
+`PHUB_UID_GID` (default `0:0`); set it consistently on bootstrap, install,
+rotation, and stack startup. Compose mounts that directory read-only at `/run/secrets`.
 The stack starts without a token. The bot checks `/run/secrets/github_token` each
 loop; if absent or empty it logs `token missing` once and idles. Installing or
 rotating the token takes effect without restarting the container.
@@ -262,8 +267,11 @@ socket is privileged, so this is a code restriction, not daemon-enforced isolati
 The bot never includes the token in command arguments, logs, replies or its repr.
 On first start, or when a repository cursor is missing (including a recreated
 state volume), the bot initializes its comment cursor to its start time in UTC.
-Older comments are ignored, including history returned by the overlap window;
-the bot never replays historical commands. Existing cursors resume polling.
+A comment is eligible only when its `created_at` is at or after the floor:
+the process start time if no cursor existed, otherwise the persisted comment
+cursor at startup minus the 60-second overlap. The floor stays fixed for that
+process and is recomputed from the persisted cursor on restart. Editing a comment
+created before the applicable floor never makes it eligible.
 A durable comment-ID ledger prevents re-execution across overlapping polls and
 restarts while the ledger is retained. Interrupted commands become FAILED after
 ten minutes and need a new comment. Reply retries are best-effort, in memory,
