@@ -1,0 +1,97 @@
+import json
+
+import pytest
+
+from preview_hub.cli import create_context, main
+
+
+def test_compose_config_wires_disk_provider(tmp_path, monkeypatch):
+    from preview_hub.runners import compose
+    from preview_hub.runners.fake import FakeRunner
+
+    calls = []
+
+    def factory(state_dir, daemon_name):
+        calls.append((state_dir, daemon_name))
+        return FakeRunner()
+
+    monkeypatch.setattr(compose, "ComposeRunner", factory)
+    monkeypatch.setenv("PHUB_RUNNER", "compose")
+    monkeypatch.setenv("PHUB_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("PHUB_CATALOG", "deploy/hub-stack/catalog.yaml")
+    monkeypatch.setenv("PHUB_DAEMON_NAME", "expected-daemon")
+    ctx = create_context()
+    assert calls == [(tmp_path, "expected-daemon")]
+    assert ctx.free_space() > 0
+
+
+def test_inventory_cli(ctx, capsys):
+    assert main(["inventory", "test-one"], ctx) == 0
+    assert not any(json.loads(capsys.readouterr().out).values())
+
+
+def test_serve_runs_gc_before_wait(ctx, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "preview_hub.cli.ExpireEnvironments.execute", lambda self: calls.append("gc")
+    )
+
+    def stop(seconds):
+        calls.append(seconds)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("preview_hub.cli.time.sleep", stop)
+    with pytest.raises(KeyboardInterrupt):
+        main(["serve", "--interval", "15"], ctx)
+    assert calls == ["gc", 15]
+
+
+def test_cli_up_renders_real_plan(ctx, monkeypatch, capsys):
+    import yaml
+
+    from preview_hub.contracts import EnvName
+    from preview_hub.runners.compose import render
+
+    apply = ctx.runner.apply
+    rendered = []
+
+    def render_and_apply(plan):
+        assert type(plan.env) is EnvName
+        document = render(plan)
+        rendered.append(yaml.safe_load(yaml.safe_dump(document)))
+        return apply(plan)
+
+    monkeypatch.setattr(ctx.runner, "apply", render_and_apply)
+    assert main(["up", "smoke2", "--format", "json"], ctx) == 0
+    assert json.loads(capsys.readouterr().out)["state"] == "READY"
+    assert rendered[0]["services"]["backend"]["labels"]["dev.phub.env"] == "smoke2"
+
+
+@pytest.mark.parametrize(
+    "command", [["list"], ["status", "smoke2"], ["down", "smoke2"]]
+)
+def test_invalid_gc_interval_does_not_affect_other_commands(ctx, monkeypatch, command):
+    assert main(["up", "smoke2"], ctx) == 0
+    monkeypatch.setenv("PHUB_GC_INTERVAL", "15m")
+    assert main(command, ctx) == 0
+
+
+def test_invalid_gc_interval_is_serve_input_error(monkeypatch, capsys):
+    monkeypatch.setenv("PHUB_GC_INTERVAL", "15m")
+    assert main(["serve"]) == 2
+    assert "15m" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "args,env,expected", [([], "15", 15), (["--interval", "20"], "15m", 20)]
+)
+def test_serve_gc_interval_resolution(ctx, monkeypatch, args, env, expected):
+    monkeypatch.setenv("PHUB_GC_INTERVAL", env)
+
+    def stop(seconds):
+        assert seconds == expected
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("preview_hub.cli.time.sleep", stop)
+    with pytest.raises(KeyboardInterrupt):
+        main(["serve", *args], ctx)

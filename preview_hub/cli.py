@@ -6,7 +6,9 @@ import getpass
 import json
 import os
 import sys
+import time
 from contextlib import ExitStack
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Protocol, cast
 from urllib.parse import urlsplit
@@ -31,7 +33,7 @@ from .lifecycle import (
     UpdateEnvironment,
 )
 from .registry import BusyError, Registry
-from .runner import Health, ImageCollector
+from .runner import Health, ImageCollector, Runner
 
 
 class LogReader(Protocol):
@@ -92,9 +94,24 @@ def create_context() -> Context:
     )
     catalog = Catalog.parse(load_yaml(catalog_path))
     runner_name = config_override(config, "PHUB_RUNNER", "runner", "fake")
-    if runner_name != "fake":
+    runner: Runner
+    free_space = None
+    if runner_name == "compose":
+        from .runners.compose import ComposeRunner, vm_free_bytes
+
+        runner = ComposeRunner(
+            state_dir,
+            config_override(
+                config, "PHUB_DAEMON_NAME", "daemon_name", "colima-preview-hub"
+            ),
+        )
+        free_space = lambda: vm_free_bytes(state_dir)
+    elif runner_name == "fake":
+        from .runners.fake import FakeRunner
+
+        runner = FakeRunner()
+    else:
         raise InvalidInput(f"Runner unavailable: {runner_name}")
-    from .runners.fake import FakeRunner
 
     return Context(
         Registry(state_dir),
@@ -103,13 +120,23 @@ def create_context() -> Context:
             Path(config_override(config, "PHUB_SOURCE_DIR", "source_dir", "/src")),
             {v.repo: k for k, v in catalog.services.items()},
         ),
-        FakeRunner(),
+        runner,
+        free_space=free_space,
     )
 
 
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(prog="phub")
     commands = root.add_subparsers(dest="command", required=True)
+    serve = commands.add_parser("serve")
+    serve.add_argument(
+        "--interval",
+        type=float,
+        default=None,
+    )
+    inventory = commands.add_parser("inventory")
+    inventory.add_argument("name", nargs="?")
+    inventory.add_argument("--format", choices=("json",), default="json")
     for command in ("up", "update", "status", "list", "down", "logs", "gc"):
         sub = commands.add_parser(command)
         sub.add_argument(
@@ -135,7 +162,16 @@ def parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None, context: Context | None = None) -> int:
     args = parser().parse_args(argv)
     try:
+        if args.command == "serve":
+            if args.interval is None:
+                args.interval = float(os.environ.get("PHUB_GC_INTERVAL", "900"))
+            if args.interval <= 0:
+                raise InvalidInput("GC interval must be positive")
         ctx = context or create_context()
+        if args.command == "serve":
+            while True:
+                main(["gc", "--format", "json"], ctx)
+                time.sleep(args.interval)
         actor = f"cli:{getpass.getuser()}"
         refs: dict[str, str] = {}
         for value in getattr(args, "refs", []):
@@ -144,7 +180,9 @@ def main(argv: list[str] | None = None, context: Context | None = None) -> int:
                 raise InvalidInput("--set requires service=ref")
             refs[key] = ref
         result: Any
-        if args.command == "up":
+        if args.command == "inventory":
+            result = asdict(ctx.runner.inventory(args.name))
+        elif args.command == "up":
             if args.file:
                 spec = CompositionSpec.parse(load_yaml(Path(args.file)))
                 if args.name and args.name != spec.name:

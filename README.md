@@ -1,8 +1,7 @@
 # preview-hub
 
-Branch-pinned multi-repository preview environments. This core provides contracts,
-planning, a SQLite registry and lifecycle orchestration. The only bundled runner
-is `fake`; Docker/Compose is a separate implementation unit.
+Branch-pinned multi-repository preview environments. The hub provides contracts,
+planning, a SQLite registry, lifecycle orchestration, and fake/Compose runners.
 
 ## Development
 
@@ -86,3 +85,94 @@ before descriptors can advertise working per-environment accounts.
 
 The test fixtures are copies of the U1 backend and U2 frontend `preview.yaml`
 files. Tests use synthetic local Git repositories and never contact a remote.
+
+## Container runtime (U4)
+
+The dedicated Colima profile `preview-hub` contains the hub, Traefik and every
+preview container. The host runs the VM only; no Python service or GC daemon is
+installed there. `phub-state` stores SQLite, locks and rendered Compose files;
+`phub-src` stores immutable checkouts. The hub mounts the VM Docker socket and
+refuses any daemon whose `docker info` name is not `colima-preview-hub`.
+
+`runner: compose` (or `PHUB_RUNNER=compose`) selects the real runner.
+`daemon_name` / `PHUB_DAEMON_NAME` explicitly overrides the expected name.
+The default remains `fake` for compatibility. The stack selects Compose.
+`phub serve --interval 900` runs GC immediately and every 15 minutes, including
+U3's stale-operation recovery. `PHUB_GC_INTERVAL` changes the default interval.
+`phub inventory [environment] --format json` exposes label-scoped runtime objects.
+Shared cached service images have service labels, not environment labels.
+
+The image defaults to UID 1000. The stack explicitly uses root because Colima's
+Docker socket is normally root-owned. To run the hub as UID 1000, first grant its
+GID socket access and make both named volumes writable, then set
+`PHUB_UID_GID=1000:<socket-gid>` when starting the stack. Socket access grants
+control of the dedicated VM regardless of UID. Traefik has a read-only socket
+mount, Docker-provider ownership constraint, and opt-in routing labels.
+
+Application and init containers use the manifest memory limit; PostgreSQL uses
+512 MiB. PostgreSQL starts and becomes healthy before ordered migration/seed
+jobs run from the service image. Only changed services and their init jobs run
+on update. HTTP health probes use `curlimages/curl:8.12.1` as disposable labelled
+containers on the environment network; command checks use Docker healthchecks.
+The Docker daemon therefore needs image-registry access, including that probe
+image. `phub logs` includes application stdout and stderr. U3 persists its health
+failure message in `last_error.log_excerpt`; retrieve full application logs with
+`phub logs` before deleting a failed environment.
+
+From a MacBook with SSH access to the Mac Studio (Colima and Docker CLI already
+available there):
+
+```sh
+scripts/vm-bootstrap.sh <published-git-ref> [https://github.com/cafitac/preview-hub.git]
+scripts/phub up demo --set backend=main --set frontend=main
+scripts/phub tunnel
+# In another terminal, open http://app.demo.localhost:18080
+scripts/phub status demo --format descriptor
+scripts/phub inventory demo
+scripts/phub down demo
+```
+
+Bootstrap only starts profile `preview-hub` (4 CPU, 8 GiB, 40 GiB), builds from the
+requested ref inside its VM, and brings up the stack. Repeating it preserves
+state/source volumes. Stack files live in `/opt/phub` inside the VM; temporary
+build files are removed. An existing running profile is preserved, so verify its
+resource settings separately if it predates this bootstrap. It never restarts,
+resizes or deletes another profile.
+
+`PHUB_SSH_HOST` defaults to `trading-macstudio`; `PHUB_SSH_OPTS` is a whitespace
+separated list of SSH options (use SSH config for values containing spaces).
+The wrapper quotes each remote argument, checks host free space before up/update
+(15 GiB minimum, exit 4), and leaves the separate VM guard at 5 GiB. Spec files
+passed with `-f` must already exist inside the hub container. The SSH tunnel binds
+local port 18080; the proxy host publication is loopback-only.
+
+### Runtime acceptance
+
+The E2E script requires local `curl`, `git`, `python3`, SSH access, published
+example branches and a bootstrapped hub. It creates unique disposable environment
+names and always attempts to delete them and verify empty inventories on exit.
+
+```sh
+E2E_ORIGINAL_SHA=<40-hex-original> E2E_MOVED_SHA=<40-hex-second> \
+  E2E_BRANCH=e2e-alt E2E_FRONTEND_BRANCH=main E2E_BROKEN_BRANCH=e2e-broken \
+  e2e/run.sh
+```
+
+After A1 creates the environment, move `e2e-alt` to the second commit **outside**
+the script. It polls the branch for up to 5 minutes (`E2E_MOVE_POLLS`, 5 seconds
+per poll) and never pushes. It verifies the original pinned SHA, isolation of
+notes and frontend configuration, deletion isolation, repeated-up idempotency,
+TTL GC, and broken-health failure cleanup. Every scenario prints before/after
+inventories. `E2E_EXISTING_TUNNEL=1` reuses an already running tunnel;
+`E2E_BACKEND_REPO` overrides the branch-observation URL. Live A1–A5 and image
+build/bootstrap require a Docker-enabled networked machine; unit tests use a fake
+executor and do not contact Docker.
+
+Teardown is destructive and must be run deliberately after saving any evidence:
+
+```sh
+# First use scripts/phub down for each environment.
+ssh trading-macstudio colima delete --profile preview-hub
+```
+
+This removes the dedicated VM and all hub state, source caches and preview data.

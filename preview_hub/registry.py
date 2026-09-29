@@ -3,6 +3,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import re
 import sqlite3
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -66,7 +67,11 @@ class Registry:
                 "SELECT value FROM schema_meta WHERE key='version'"
             ).fetchone()
             version = int(row[0]) if row else 0
-            files = sorted((Path(__file__).parent / "migrations").glob("*.sql"))
+            files = sorted(
+                file
+                for file in (Path(__file__).parent / "migrations").glob("*.sql")
+                if file.is_file() and re.fullmatch(r"[0-9]{4}_.*\.sql", file.name)
+            )
             if version > len(files):
                 raise RuntimeError("Registry schema is newer than this hub")
             for file in files:
