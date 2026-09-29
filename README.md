@@ -233,7 +233,7 @@ with **Pull requests: read and write**, **Issues: read and write**,
 the issues endpoint but require Pull requests write permission.
 Do not use the host's broad `gh` login token. From the MacBook, pipe the token from
 its secure source into `scripts/bot-token` (never put the value in an argument),
-or run `scripts/bot-token`, paste it at the hidden stdin prompt, and press Ctrl-D.
+or run `scripts/bot-token`, paste it at the hidden stdin prompt, then press Enter and Ctrl-D.
 Run `scripts/bot-token --check` to check presence without reading its contents.
 The installer uses `PHUB_SSH_HOST`, `PHUB_SSH_OPTS`, and `PHUB_REMOTE_PATH` like
 `scripts/phub`, and writes only inside the `preview-hub` VM, using sudo, mode 0400,
@@ -284,3 +284,32 @@ are rebuilt from stored status, environment and error plus a fresh
 `phub status <env> --format json` when an environment exists. GitHub provides no
 idempotency key for issue comments, so acknowledgement loss can cause duplicates.
 Bot data is stored only in the revision-2 bot tables, never in schema metadata.
+
+A successful reply looks like:
+
+```text
+preview pr-backend-42: READY
+
+| service | commit | URL |
+| --- | --- | --- |
+| backend | 0123456789ab | http://api.pr-backend-42.localhost:18080 |
+```
+
+From the MacBook, run `e2e/bot.sh` to exercise up, status, repeated polling,
+down and PR-close cleanup against a temporary PR in
+`cafitac/preview-example-backend`. It requires `gh`, `jq`, `python3`, a running
+bot and working `scripts/phub` SSH access. Each GitHub command uses the
+`cafitac` owner's `gh auth token --user cafitac` credentials; it does not read
+the VM's bot token. Set `PHUB_BOT_INTERVAL` to the deployed interval if it differs
+from 20 seconds. Replies are awaited for up to three minutes and PR-close
+cleanup for two minutes. The exit trap closes the PR, removes its branch,
+runs `phub down` and verifies empty label inventory. Rejection cases are unit
+tested; the separate `e2e/run.sh` covers the existing hub regression scenarios.
+
+If no reply appears, first run `scripts/bot-token --check`. `token present`
+checks file presence only, not credential validity. A bot log line
+`authentication failed: repo=...` means GitHub returned 401 or a non-rate-limit
+403: check token expiry, repository access and the permissions above, then
+reinstall with `scripts/bot-token`. The installer prints `token installed` on
+success. Rate-limit responses remain retryable deferrals. Inspect the
+`phub-bot` logs inside the `preview-hub` VM without printing the secret file.

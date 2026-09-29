@@ -40,6 +40,7 @@ command="export PATH=$(quote "$remote_path"); colima ssh --profile preview-hub -
 if [ "$mode" = check ]; then
     exec ssh ${PHUB_SSH_OPTS:-} -T "$host" "$command" < /dev/null
 fi
+printf '%s\n' "Paste the token, then press Enter and Ctrl-D (input is hidden)." >&2
 if [ -t 0 ]; then
     saved_tty=$(stty -g)
     trap 'stty "$saved_tty"' 0
@@ -47,3 +48,4 @@ if [ -t 0 ]; then
     stty -echo
 fi
 ssh ${PHUB_SSH_OPTS:-} -T "$host" "$command"
+printf '%s\n' 'token installed' >&2

@@ -188,3 +188,33 @@ def test_expired_cooldown_is_cleared(token_path, monkeypatch, later_status):
         assert not later.value.retryable
         assert later.value.retry_at == 0
     assert api.retry_at == 0
+
+
+@pytest.mark.parametrize(
+    "status,headers,authentication",
+    [
+        (401, {}, True),
+        (403, {}, True),
+        (403, {"X-RateLimit-Remaining": "42"}, True),
+        (403, {"X-RateLimit-Remaining": "0"}, False),
+        (403, {"Retry-After": "120"}, False),
+        (429, {}, False),
+        (503, {}, False),
+    ],
+)
+def test_authentication_diagnostic(token_path, caplog, status, headers, authentication):
+    def transport(request, *, timeout):
+        message = Message()
+        for key, value in headers.items():
+            message[key] = value
+        raise HTTPError(
+            request.full_url, status, TOKEN, message, io.BytesIO(TOKEN.encode())
+        )
+
+    api = UrllibGitHubApi(token_path, transport=transport, sleep=lambda _: None)
+    with pytest.raises(GitHubError):
+        api.get_pr("owner/backend", 42)
+    assert (
+        "authentication failed: repo=owner/backend" in caplog.text
+    ) == authentication
+    assert TOKEN not in caplog.text
