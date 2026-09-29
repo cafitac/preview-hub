@@ -9,7 +9,7 @@
 - Repository: cafitac/preview-hub (new; companion repos cafitac/preview-example-backend, cafitac/preview-example-frontend)
 - Created: 2026-09-29
 - Updated: 2026-09-29
-- Current slice: S1 walking skeleton (sprint 20260929-s1-v2)
+- Current slice: S2 extensibility + ai-qa descriptor (sprint 20260930-s2-v1)
 - Current PR unit: CONTROL
 - Delivery strategy: STANDALONE
 - Current delivery bundle: N/A
@@ -28,21 +28,21 @@
 - Failure/recovery owner map: create/update/delete failures owned by hub lifecycle; partial-create cleanup by runner (design input)
 - Cleanup inventory map: per-environment Compose project, network, volumes, DB, proxy route, built images, workspace checkouts (design input)
 - Parent control record: N/A (this record is the sprint control record)
-- Sprint ID: 20260929-s1-v2
-- Sprint manifest: /Users/reddit/Project/cafitac/preview-hub/.dev/features/20260929-preview-hub-v1/sprints/20260929-s1-v2.md
-- Sprint manifest SHA-256: 29d5b493dca2f9fc689c59d237d07e82dc24b905b6e11cd99664e35477324b5d
-- Authority grant: manifest authority matrix + REPO_BOOTSTRAP + RUNTIME_HOST_SETUP, confirmed by the user 2026-09-29
-- Approved delivery scope: U1–U4 per manifest 20260929-s1-v2; Ready-for-user-merge handoff after exact-head gates; merges user-owned
+- Sprint ID: 20260930-s2-v1
+- Sprint manifest: /Users/reddit/Project/cafitac/preview-hub/.dev/features/20260929-preview-hub-v1/sprints/20260930-s2-v1.md
+- Sprint manifest SHA-256: 800dc41c4792b3c5d7e0c01406fa44b8155770f4972fe3e034053f74babbe8ff
+- Authority grant: manifest 20260930-s2-v1 authority matrix + REPO_BOOTSTRAP + RUNTIME_HOST_SETUP + E2E_FIXTURES + MERGE (D7), confirmed by the user 2026-09-29
+- Approved delivery scope: U5–U7 per manifest 20260930-s2-v1; merge by main task under D7
 - Delivery finalization: AUTO_AFTER_GATES
-- Delivery finalization scope: U1, U2, U3, U4 PRs in cafitac/preview-example-backend, cafitac/preview-example-frontend, cafitac/preview-hub (main)
-- Delivery finalization evidence: user confirmation 2026-09-29 "응 이 범위로 확정하고 시작해줘" for manifest digest 29d5b493dca2f9fc689c59d237d07e82dc24b905b6e11cd99664e35477324b5d
-- Eligible unit IDs: U1, U2, U3, U4
+- Delivery finalization scope: U5, U6, U7 PRs in cafitac/preview-example-notifier, cafitac/preview-example-backend, cafitac/preview-hub (main)
+- Delivery finalization evidence: user confirmation 2026-09-29 "응 이 범위로 확정하고 시작해줘" for manifest digest 800dc41c4792b3c5d7e0c01406fa44b8155770f4972fe3e034053f74babbe8ff
+- Eligible unit IDs: U5, U6, U7
 - Review topology: CODE_POLISH_QUORUM
 - Review quorum: 2
 - Review scheduling: PARALLEL
 - Review cycle budget: 5
-- Unit review topology map: U1=INHERIT, U2=INHERIT, U3=INHERIT, U4=INHERIT
-- Unit review cycle budget map: U1=INHERIT, U2=INHERIT, U3=INHERIT, U4=INHERIT
+- Unit review topology map: U5=INHERIT, U6=INHERIT, U7=INHERIT
+- Unit review cycle budget map: U5=INHERIT, U6=INHERIT, U7=INHERIT
 - Single-reviewer exception scope: N/A
 - Single-reviewer exception rationale: N/A
 - Single-reviewer exception approval: N/A
@@ -84,24 +84,24 @@
 ## Autonomous sprint
 
 - Sprint state: SPRINT_COMPLETE
-- Manifest version: 2 (v1 superseded, never confirmed)
-- Manifest confirmation: user, 2026-09-29, "응 이 범위로 확정하고 시작해줘", digest re-hashed unchanged after confirmation
-- Planning base SHA: per repository bootstrap commit (greenfield), recorded at bootstrap
+- Manifest version: 1 (S2)
+- Manifest confirmation: user, 2026-09-29, "응 이 범위로 확정하고 시작해줘", digest 800dc41c4792b3c5d7e0c01406fa44b8155770f4972fe3e034053f74babbe8ff re-hashed unchanged
+- Planning base SHA: preview-example-backend 885a373810a81e1db3972c11955d717a99b94a10; preview-hub 11d0aa87a9dfeb66582528e5d7cce2f4cd3c5296; notifier at bootstrap
 - Base drift policy: ALLOW_IF_DISJOINT
-- Execution base SHA: preview-example-backend 25770cd8e5d5ccaec55ded09def7c2603b325166, preview-example-frontend 1ab3ef6bf4f59f9f0e28aa207e5ef043f6398ae0, preview-hub c93fa5c20acb4c946ed8f0161ab33865acff3dbb (bootstrap commits)
-- Started: 2026-09-29 (main task, Claude Code session)
+- Execution base SHA: notifier 7ab7aa87caeb707e6847e9826fbfbe9876fa4cc6 (bootstrap); backend 885a373810a81e1db3972c11955d717a99b94a10; preview-hub 11d0aa87a9dfeb66582528e5d7cce2f4cd3c5296
+- Started: 2026-09-29 (S2)
 - Expires: 2026-10-06 23:59 KST
 - Desired finish state: READY_FOR_USER_MERGE
 - Learning mode: PROPOSE
 - Eligible unit IDs: U1, U2, U3, U4
-- WIP / unit / repair / retry budgets: WIP 3 / units 4 / repair 2 per unit / CI retry 2 (consumed: 0)
+- WIP / unit / repair / retry budgets: WIP 2 / units 3 / repair 2 (+3 runtime) per unit / CI retry 2 (consumed: 0)
 - Setup reservations: none (converted to claims)
 - Active PR units: none
-- Remaining eligible units: U1=MERGED 885a3738, U2=MERGED a9324753, U3=MERGED ee96ab0e, U4=MERGED 96a46def
+- Remaining eligible units: U5=MERGED bd5faec3, U6=MERGED 544fd35e, U7=MERGED fe3f5cbb
 - Authority matrix: see manifest
-- Selection rule: U1–U3 in ID order up to WIP; U4 after U1–U3 merges are read back
+- Selection rule: U5 and U6 in parallel; U7 after both merges are read back
 - Stop and escalation: see manifest
-- Boundary decision: sprint complete 2026-09-29; next sprint S2 draft manifest sprints/20260930-s2-v1.md awaiting confirmation
+- Boundary decision: S2 complete 2026-09-29; core value 2 proven (A6) and descriptor validated (A8); next: S3 PR comment bot needs planning (open O2)
 
 ## Outcome
 
@@ -264,3 +264,9 @@ One command (CLI, later a PR comment) creates an isolated environment that runs 
 - 2026-09-29: U1, U2, U3 merged (see unit records). U4 dependencies satisfied; U4 base = preview-hub main ee96ab0e (moved only by its own dependency U3; disjoint per ALLOW_IF_DISJOINT).
 - 2026-09-29: U4 RUNTIME_HOST_SETUP: `colima start --profile preview-hub --cpu 4 --memory 8 --disk 40 --vm-type vz` on trading-macstudio (Docker 29.5.2). Incident: colima switched the host's current docker context to colima-preview-hub (a host setting change); restored immediately to `default` (verified) before any other command used it. Fix carried into U4: bootstrap uses `colima start --activate=false`.
 - 2026-09-29: SPRINT_COMPLETE for 20260929-s1-v2: U1–U4 merged; runtime E2E A1–A5 green on trading-macstudio (hub stack left running in the preview-hub VM for S2). Review cycles used: U1 4, U2 3, U3 6 (budget 7 by D8), U4 5.
+- 2026-09-29: S2 manifest 20260930-s2-v1 confirmed by the user (digest 800dc41c4792b3c5d7e0c01406fa44b8155770f4972fe3e034053f74babbe8ff); SPRINT_RUNNING.
+- 2026-09-29: notifier repository created (public, MIT, bootstrap 7ab7aa87); U5/U6 reserved, initialized and claimed.
+- 2026-09-29: SPRINT_PAUSED — codex worker lane unavailable: 'gpt-6-astra' not supported for Codex with a ChatGPT account (2 attempts, STOP_FOR_USER). Awaiting user decision on the worker route. U6 merged before the pause (544fd35e).
+- 2026-09-29: Cause found: the MacBook Codex login changed at 14:25; after the user reconnected an account (14:29) a minimal probe with gpt-6-astra returned OK. Route unchanged. Sprint resumed. (Mac Studio Codex token is invalidated — user re-login pending; not needed for this sprint's local workers.)
+- 2026-09-29: U5 merged (bd5faec3); U5 and U6 merges read back; U7 reserved and claimed.
+- 2026-09-29: SPRINT_COMPLETE for 20260930-s2-v1: U5–U7 merged; E2E A1–A6 + A8 green on trading-macstudio; hub/schemas code unchanged by S2. Review cycles: U5 3, U6 1, U7 3. One pause: Codex worker lane unavailable after a login change (resolved by the user).
