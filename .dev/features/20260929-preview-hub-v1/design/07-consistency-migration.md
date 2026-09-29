@@ -27,6 +27,16 @@
 - Routing: the shared `phub-proxy` (Traefik, Docker provider restricted to `dev.phub.managed=true`) is attached to each environment network on create and detached on delete. Hostname `<subdomain>.<env>.localhost`; the proxy publishes 18080 in the VM, Colima forwards it to the host's 127.0.0.1:18080, and the MacBook reaches it through `ssh -L 18080:127.0.0.1:18080`. No DNS, host network or Tailscale changes.
 - GitHub comments (S3): posted after the operation's final state is committed; a failed comment post never changes environment state.
 
+## PR comment bot (revision 3)
+
+- Exactly-once execution per comment: `bot_comments.comment_id` primary key is inserted before any side effect; a duplicate poll result conflicts and is skipped. Polling overlaps the cursor by 60 s so edits and clock skew never drop comments.
+- Ordering: commands for the same PR run sequentially (the hub's per-environment lock already rejects overlap with exit 3; the bot replies "busy, retry" instead of queueing).
+- Authorization before effects: author association OWNER/MEMBER/COLLABORATOR, base repository in the catalog, head repository == base repository (fork PRs refused), PR open. The service built from the PR is pinned to `head.sha` read at command time, never to a branch name.
+- The bot has no Docker authority beyond `docker exec phub-hub phub ...`; hub guards (capacity, disk, labels) apply unchanged.
+- Closed PRs: each loop lists PRs closed since the last scan and runs `phub down pr-<service>-<number>`; `down` of an unknown environment is already a no-op sweep.
+- Token: fine-grained, catalog repositories only, created by the user and delivered as a Docker secret file (`/run/secrets/github_token`); never logged; rate limit ~ (repos × 2 requests) per 20 s ≈ 1,440/h for 4 repositories, under the 5,000/h limit.
+- Crash recovery: RUNNING rows older than 10 min become FAILED with an "interrupted" reply; unsent replies retried up to 3 times.
+
 ## Capacity and safety limits
 
 - Max active environments: 5 (configurable). `up` beyond the limit is rejected before any work.
@@ -36,7 +46,7 @@
 
 ## Current-to-target migration
 
-- Compatibility and deploy order: greenfield; the hub stack (phub-hub + phub-proxy + volumes) is started by one Compose file inside the VM; registry schema revision 1 is created on first run (`schema_meta.version=1`). Later schema changes use numbered SQL migrations applied at hub start. Upgrading the hub = rebuild its image and recreate the container; volumes keep the registry.
+- Compatibility and deploy order: greenfield (registry schema revision 2 adds `bot_comments`/`bot_cursors` via migration 0002, additive); the hub stack (phub-hub + phub-proxy + volumes) is started by one Compose file inside the VM; registry schema revision 1 is created on first run (`schema_meta.version=1`). Later schema changes use numbered SQL migrations applied at hub start. Upgrading the hub = rebuild its image and recreate the container; volumes keep the registry.
 - Backfill and verification: none.
 - Rollback: environments are disposable; removing everything = `phub down` for each environment, then `colima delete --profile preview-hub` (the VM holds the hub, registry volumes, caches, proxy and images; nothing is left on the host).
 - Shadow / cutover / kill switch: not applicable.

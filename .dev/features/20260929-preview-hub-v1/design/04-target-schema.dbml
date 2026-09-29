@@ -1,6 +1,6 @@
 Project target_schema {
   database_type: 'SQLite'
-  Note: 'preview-hub v1 environment registry (/state/state.db on the phub-state volume inside the preview-hub Colima VM). Schema revision 1. Application-level invariants are marked [app]; the rest is enforced by SQLite.'
+  Note: 'preview-hub v1 environment registry (/state/state.db on the phub-state volume inside the preview-hub Colima VM). Schema revision 2 (revision 3 of the design adds the bot tables; migration 0002). Application-level invariants are marked [app]; the rest is enforced by SQLite.'
 }
 
 Table environments {
@@ -57,4 +57,29 @@ Table operations {
 Table schema_meta {
   key text [pk]
   value text [not null]
+}
+
+Table bot_comments {
+  comment_id integer [pk, note: 'GitHub issue comment id; primary key = deduplication: a comment is executed at most once']
+  repo text [not null, note: 'owner/name from the catalog']
+  pr_number integer [not null]
+  author text [not null]
+  command text [not null, note: 'normalized /preview command']
+  status text [not null, note: 'RECEIVED|REJECTED|RUNNING|DONE|FAILED']
+  environment text [null, note: 'pr-<service>-<number>']
+  reply_comment_id integer [null, note: 'set after the single reply is posted']
+  error text [null]
+  received_at text [not null]
+  finished_at text [null]
+
+  indexes {
+    (repo, pr_number) [name: 'ix_bot_pr']
+    (status) [name: 'ix_bot_status']
+  }
+}
+
+Table bot_cursors {
+  repo text [pk]
+  comments_since text [not null, note: 'UTC ISO-8601 of the newest processed comment update; polling uses since=<value> minus a 60 s overlap, deduplicated by comment_id']
+  closed_checked_at text [not null, note: 'last scan of closed PRs for environment cleanup']
 }

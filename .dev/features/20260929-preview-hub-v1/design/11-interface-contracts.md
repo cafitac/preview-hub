@@ -114,6 +114,9 @@ Exit codes: 0 success/no-op, 2 invalid input, 3 busy (lock held), 4 capacity/dis
 - Environment name: `pr-<service>-<number>` (the repository's service name).
 - Authorized only when the comment author association is OWNER, MEMBER or COLLABORATOR; others get a rejection reply and nothing runs.
 - The bot replies once per command with the final state, URLs and pinned commits; PR close triggers `down`.
+- Implementation (revision 3): polling bot `phub-bot` (see 07). The PR's own service is pinned to the PR head SHA; other services use `svc=ref` arguments or catalog defaults; `on_request` services join only when named.
+- Reply format (Markdown): first line `preview <env>: <STATE>`; then a table of service | commit (12 hex) | URL; on failure the stage, service and log excerpt; on rejection the reason. Commands from forks, non-collaborators, closed PRs or with parse errors get a rejection reply and run nothing.
+- Configuration: `PHUB_BOT_INTERVAL` (default 20 s, finite > 0), token file `/run/secrets/github_token`, repositories = catalog services' repos.
 
 ## C7. ai-qa environment descriptor — `environment-descriptor/v1` (JSON)
 
