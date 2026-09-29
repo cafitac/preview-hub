@@ -207,7 +207,8 @@ by exact environment, service, role and ownership labels.
 
 A8 validates a live READY descriptor and
 `e2e/fixtures/sample-qa-report.json` against the checked-out schemas, including
-date-time formats. It uses local `python3` with `jsonschema` if available;
+date-time formats. It uses local `python3` only if `jsonschema` imports and its
+`FormatChecker` has a `date-time` checker;
 otherwise it streams the schemas and documents to Python in `phub-hub` over
 the same SSH connection. Nothing is installed on the remote host.
 The sample is synthetic contract data, not evidence of a live QA run.

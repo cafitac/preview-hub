@@ -169,7 +169,7 @@ json.dump([
 ], sys.stdout)
 PY
 validator='import json,sys; from jsonschema import Draft202012Validator, FormatChecker; assert "date-time" in FormatChecker.checkers, "A8: date-time format checker unavailable; install jsonschema[format-nongpl]"; pairs=json.load(sys.stdin); [Draft202012Validator.check_schema(s) for s,d in pairs]; [Draft202012Validator(s, format_checker=FormatChecker()).validate(d) for s,d in pairs]; print("A8: descriptor and sample QA report validate")'
-if python3 -c 'import jsonschema' >/dev/null 2>&1; then
+if python3 -c 'import jsonschema; assert "date-time" in jsonschema.FormatChecker.checkers' >/dev/null 2>&1; then
     echo 'A8 validator: local python3 + jsonschema'
     python3 -c "$validator" < "$work/schema-input.json"
 else
