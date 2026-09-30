@@ -62,3 +62,55 @@
 
 - `operations` keeps who ran what (`cli:<user>`, `gh:<login>#<pr>`), when and the outcome; retained 90 days after the environment is DELETED.
 - Example services use only synthetic seed data. Test credentials in the descriptor are generated per environment and stored in the registry only for the environment's lifetime.
+
+## Revision 4 (S4): dashboard, `pr-<n>` refs, public access
+
+### Authority and ownership
+
+- The registry stays the single source of truth. The dashboard reads it and mutates only by running the same `phub` CLI entry point as a child process inside `phub-hub`; it holds no lifecycle logic of its own, so locks, guards, idempotency and the operations audit are unchanged.
+- GitHub reads (branches, open PRs, PR head) happen in `phub-hub` with the existing fine-grained token mounted read-only (`/opt/phub/secrets` → `/run/secrets`). GitHub writes stay in `phub-bot` only (replies and cross-link comments).
+- Cloudflare objects (tunnel, DNS, Access application) are owned and created by the user; the hub never calls a Cloudflare API and holds no Cloudflare token. The only Cloudflare interaction is the public JWKS fetch for JWT verification.
+
+### Security model (defence in depth)
+
+1. Cloudflare Access at the edge for `preview-hub.cafitac.com` and `phub-*.cafitac.com` (policy: owner's email).
+2. The tunnel is the only public path: `phub-hub:8080` and `phub-proxy:80` are not published beyond the VM (the proxy's 18080 stays bound to host 127.0.0.1 for SSH debugging).
+3. The hub verifies the Access JWT on every dashboard/API request, and Traefik forwardAuth asks the hub to verify it for every public environment route. A misconfigured or missing Access application therefore yields 401/403, not an open environment. Missing verifier configuration = fail closed.
+4. Mutations additionally require the dashboard `Origin` (CSRF) and JSON content type.
+5. `pr-<n>` refuses forks and closed PRs, so untrusted code is never built from the dashboard either.
+6. Local `.localhost` routes are not behind forwardAuth: they are reachable only from the VM and the host's 127.0.0.1 (SSH forward), the same trust as revision 3.
+
+### Identity and idempotency
+
+- Dashboard create without a name generates `c-<6 base32>`; retries of the same POST are not deduplicated (each click is a new environment) but capacity (max 5) bounds the effect; the UI disables the button while the request is in flight.
+- `pr-<n>` is re-resolved on `update`; a READY environment with `pr-<n>` whose PR head moved is *not* auto-updated (explicit `update`, same rule as branches).
+- Cross-link comments: `pr_links` primary key (environment, repo, pr) = at most one hub comment per pair. Crash after POST before the DB commit is recovered by searching the PR's comments for the marker `<!-- phub-link env=<env> -->` authored by the token's user before posting again.
+
+### Failure and recovery owners
+
+| Effect | Starts | Observes | Reconciles / retries | Cleans up | Verifies |
+|---|---|---|---|---|---|
+| Environment containers/routes | CLI (via dashboard, bot or user) | registry + labels | user / bot re-run; gc sweep | `down`, TTL gc (label-scoped) | A3 inventory |
+| Public route (Traefik labels) | ComposeRunner at apply | Traefik | recreated with the containers | removed with the containers | A12 404 after down |
+| Tunnel connection | Docker restart policy | cloudflared logs, `/healthz` via tunnel | cloudflared reconnects | `compose --profile public down` | A12 |
+| JWKS cache | first request | verifier | refresh on unknown kid / 1 h | in-memory | A13 tests |
+| Cross-link comment | phub-bot reconcile | pr_links | every loop (attempts counter) | edited to "removed" (never deleted; history) | A14 |
+| Dashboard child process | hub HTTP server | operations table | stale-op recovery (existing) | process exit | A10 |
+
+### Cleanup inventory
+
+- Per environment: unchanged (label-scoped). Public routes are container labels, so nothing extra remains after `down`.
+- `pr_links` rows: kept as audit with status REMOVED; purged with the 90-day operations retention.
+- Hub stack additions: container `phub-cloudflared` (label `dev.phub.managed=true`, `dev.phub.service=cloudflared`); files `/opt/phub/secrets/tunnel.json`, `/opt/phub/public.env` inside the VM.
+- User-owned (outside the VM, removed by the user on rollback): DNS `preview-hub` and `*` records, the named tunnel, the Access application.
+
+### Capacity, cost and limits
+
+- No paid service: Cloudflare Tunnel, Access (≤ 50 users), Universal SSL and proxied DNS are free-plan features; JWKS fetches are free; GitHub API stays under the authenticated limit (dashboard listing cached 60 s: ≤ 3 repos × 2 calls per minute ≈ 360/h, plus the bot's ≈ 1,440/h and cross-link calls only on change).
+- Wildcard DNS side effect: any unknown `*.cafitac.com` name now reaches this tunnel and gets 404 from Traefik (not an error page of another service). A future service on cafitac.com needs its own explicit DNS record, as today.
+
+### Migration and rollback
+
+- Migration 0003 adds `pr_links` (additive; no backfill). The catalog `public_access` block is optional; absent → revision 3 behaviour.
+- Deploy order: hub image with C9/C10 support → user creates tunnel/DNS/Access and installs credentials → `vm-bootstrap` starts the `public` profile → set `public_access` in the catalog → recreate hub/bot.
+- Rollback: remove `public_access` from the catalog and stop the `public` profile (environments created afterwards get local URLs again); the user may delete the DNS records, tunnel and Access app. Existing environments keep their injected URLs until `update`/`down`.

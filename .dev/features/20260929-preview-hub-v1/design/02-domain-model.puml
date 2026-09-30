@@ -114,4 +114,51 @@ note bottom of ServiceManifest
   Cross-service values are injected at start
   (${services.<name>.public_url}, ${resources.<id>.url}).
 end note
+
+package "Revision 4 (S4)" {
+  class PrRef <<Domain Value Object>> {
+    repo: str
+    number: int
+    --
+    parse("pr-<n>") ; resolved pin = PR head SHA (open, same repo)
+  }
+  class PublicAccess <<Domain Value Object>> {
+    host_template
+    entry_service
+    path_template
+    dashboard_host
+    --
+    urls(env, services) : one origin per environment
+  }
+  class PrLink <<Domain Value Object>> {
+    environment, repo, pr_number
+    comment_id?, rendered_version, status
+  }
+  class AccessVerifier <<service>> {
+    verify(jwt) -> Identity(email)
+    JWKS cache (1 h, refresh on unknown kid)
+  }
+  class DashboardApp <<entry point>> {
+    C9 routes; mutations spawn the phub CLI
+  }
+  class LinkReconciler <<service, phub-bot>> {
+    reconcile() : post / edit / mark removed
+  }
+  interface GitHubClient {
+    get_pr / list_branches / list_open_prs
+    list_issue_comments / post_comment / edit_comment
+  }
+}
+DashboardApp --> AccessVerifier
+DashboardApp --> GitHubClient : read
+DashboardApp ..> CreateEnvironment : via CLI child process
+GitSource ..> PrRef : resolves via GitHubClient
+LinkReconciler --> GitHubClient : write
+LinkReconciler --> PrLink
+PlanBuilder --> PublicAccess
+note bottom of GitHubClient
+  Refactor: the S3 bot client (preview_hub/bot/github.py) moves to
+  preview_hub/github.py and gains list_branches, list_open_prs,
+  edit_comment; the bot and the hub share it. One real external boundary.
+end note
 @enduml

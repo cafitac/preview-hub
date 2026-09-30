@@ -35,3 +35,20 @@ note left of READY
   (must be explicit update); any transition without the env lock.
 end note
 @enduml
+
+@startuml
+title Revision 4 — PR cross-link comment (pr_links row, owned by phub-bot)
+
+[*] --> PENDING : env pins pr-<n> (row created, comment_id null)
+PENDING --> ACTIVE : comment posted (or found by marker)
+PENDING --> PENDING : post failed (attempts+1)
+ACTIVE --> ACTIVE : env version changed -> comment edited
+ACTIVE --> REMOVED : env DELETED -> comment edited to "removed"
+PENDING --> REMOVED : env DELETED before any post (nothing to edit)
+REMOVED --> [*]
+note right of ACTIVE
+  Stored status is ACTIVE with comment_id null for PENDING.
+  One row per (environment, repo, pr): at most one hub comment.
+end note
+@enduml
+
