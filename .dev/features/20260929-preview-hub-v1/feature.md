@@ -9,7 +9,7 @@
 - Repository: cafitac/preview-hub (new; companion repos cafitac/preview-example-backend, cafitac/preview-example-frontend)
 - Created: 2026-09-29
 - Updated: 2026-09-29
-- Current slice: S3 PR comment bot (sprint 20260930-s3-v1)
+- Current slice: S4 central dashboard and public access (sprint 20260930-s4-v1)
 - Current PR unit: CONTROL
 - Delivery strategy: STANDALONE
 - Current delivery bundle: N/A
@@ -28,21 +28,21 @@
 - Failure/recovery owner map: create/update/delete failures owned by hub lifecycle; partial-create cleanup by runner (design input)
 - Cleanup inventory map: per-environment Compose project, network, volumes, DB, proxy route, built images, workspace checkouts (design input)
 - Parent control record: N/A (this record is the sprint control record)
-- Sprint ID: 20260930-s3-v1
-- Sprint manifest: /Users/reddit/Project/cafitac/preview-hub/.dev/features/20260929-preview-hub-v1/sprints/20260930-s3-v1.md
-- Sprint manifest SHA-256: ea1d996218f502805520967ea295895b25fa7d77e38840a0ef9a80fc303718a0
-- Authority grant: manifest 20260930-s3-v1 authority matrix + RUNTIME_HOST_SETUP + LIVE_PR_E2E + E2E_FIXTURES + MERGE (D7), confirmed by the user 2026-09-29
-- Approved delivery scope: U8–U9 per manifest 20260930-s3-v1; merge by main task under D7
+- Sprint ID: 20260930-s4-v1
+- Sprint manifest: /Users/reddit/Project/cafitac/preview-hub/.dev/features/20260929-preview-hub-v1/sprints/20260930-s4-v1.md
+- Sprint manifest SHA-256: 86c6c422c953e9b720732f674d0f29845dd385d2ef13e9cc07bf9d42669dd04d
+- Authority grant: manifest 20260930-s4-v1 authority matrix + RUNTIME_HOST_SETUP + LIVE_PR_E2E + E2E_FIXTURES + PUBLIC_READ_CHECKS + MERGE (D7), confirmed by the user 2026-09-29
+- Approved delivery scope: U10–U14 per manifest 20260930-s4-v1; merge by main task under D7
 - Delivery finalization: AUTO_AFTER_GATES
-- Delivery finalization scope: U8, U9 PRs in cafitac/preview-hub (main)
-- Delivery finalization evidence: user confirmation 2026-09-29 "응 이 범위로 확정하고 시작해줘" for manifest digest ea1d996218f502805520967ea295895b25fa7d77e38840a0ef9a80fc303718a0
-- Eligible unit IDs: U8, U9
+- Delivery finalization scope: U10–U14 PRs in cafitac/preview-hub (main)
+- Delivery finalization evidence: user confirmation 2026-09-29 "응 진행해줘" for manifest digest 86c6c422c953e9b720732f674d0f29845dd385d2ef13e9cc07bf9d42669dd04d
+- Eligible unit IDs: U10, U11, U12, U13, U14
 - Review topology: CODE_POLISH_QUORUM
 - Review quorum: 2
 - Review scheduling: PARALLEL
 - Review cycle budget: 5
-- Unit review topology map: U8=INHERIT, U9=INHERIT
-- Unit review cycle budget map: U8=INHERIT, U9=INHERIT
+- Unit review topology map: U10=INHERIT, U11=INHERIT, U12=INHERIT, U13=INHERIT, U14=INHERIT
+- Unit review cycle budget map: U10=INHERIT, U11=INHERIT, U12=INHERIT, U13=INHERIT, U14=INHERIT
 - Single-reviewer exception scope: N/A
 - Single-reviewer exception rationale: N/A
 - Single-reviewer exception approval: N/A
@@ -64,8 +64,8 @@
 - Design profile: STANDARD
 - Design status: APPROVED
 - Design root: /Users/reddit/Project/cafitac/preview-hub/.dev/features/20260929-preview-hub-v1/design
-- Design approval: revision 3 APPROVED by user 2026-09-29 ("승인하고 계속 진행해줘") for digest 084565e1635122f4f8db354bd59709eebedd74bd4829bf023be8de054dd2581f; revisions 1–2 superseded
-- Design evidence identity: artifact_set_sha256 084565e1635122f4f8db354bd59709eebedd74bd4829bf023be8de054dd2581f (revision 3, polling PR bot)
+- Design approval: revision 4 APPROVED by user 2026-09-29 ("승인할게 진행해줘") for digest 0093cda1e186286408260256f21573a131cc35c2d5e8c6aedfbdbe6185216199 (S4, revalidated unchanged); revision 3 APPROVED by user 2026-09-29 ("승인하고 계속 진행해줘") for digest 084565e1635122f4f8db354bd59709eebedd74bd4829bf023be8de054dd2581f; revisions 1–2 superseded
+- Design evidence identity: artifact_set_sha256 0093cda1e186286408260256f21573a131cc35c2d5e8c6aedfbdbe6185216199 (revision 4, S4 dashboard and public access)
 - Service boundary E2E: RUNTIME_HOST_E2E (two example services + DB on trading-macstudio)
 - Service boundary waiver: N/A
 - Repository-wide checks: to be defined at repository creation (ruff, pyright/mypy, pytest for hub)
@@ -74,7 +74,7 @@
 
 - Workflow stage: FEATURE_PLAN
 - Last completed stage: FEATURE_PLAN
-- Next eligible action: FEATURE_PLAN
+- Next eligible action: AGENT_SQUAD (run sprint 20260930-s4-v1)
 - Next action class: LOCAL_CONTINUE
 - Gate state: NONE
 - Gate reason:
@@ -84,24 +84,24 @@
 ## Autonomous sprint
 
 - Sprint state: SPRINT_COMPLETE
-- Manifest version: 1 (S3)
-- Manifest confirmation: user, 2026-09-29, "응 이 범위로 확정하고 시작해줘", digest ea1d996218f502805520967ea295895b25fa7d77e38840a0ef9a80fc303718a0 re-hashed unchanged
-- Planning base SHA: preview-hub ed54eed49aa708a59609f6ed7a1ddae6e6417a05; preview-example-backend 544fd35e612f9751547e650f50ab0a5f1d5b1567
+- Manifest version: 1 (S4)
+- Manifest confirmation: user, 2026-09-29, "응 진행해줘", digest 86c6c422c953e9b720732f674d0f29845dd385d2ef13e9cc07bf9d42669dd04d re-hashed unchanged
+- Planning base SHA: preview-hub 1d95074fc6edd2aba988b7a0b17e1d739d30bed9; preview-example-backend 544fd35e612f9751547e650f50ab0a5f1d5b1567; preview-example-frontend a9324753c04be627202c7d33c53a2c16b41182dc
 - Base drift policy: ALLOW_IF_DISJOINT
-- Execution base SHA: preview-hub ed54eed49aa708a59609f6ed7a1ddae6e6417a05
-- Started: 2026-09-29 (S3)
-- Expires: 2026-10-06 23:59 KST
+- Execution base SHA: preview-hub 1d95074fc6edd2aba988b7a0b17e1d739d30bed9
+- Started: 2026-09-29 (S4)
+- Expires: 2026-10-10 23:59 KST
 - Desired finish state: READY_FOR_USER_MERGE
 - Learning mode: PROPOSE
 - Eligible unit IDs: U1, U2, U3, U4
-- WIP / unit / repair / retry budgets: WIP 1 / units 2 / repair 2 (+3 runtime) per unit / CI retry 2 (consumed: 0)
+- WIP / unit / repair / retry budgets: WIP 2 / units 5 / repair 2 (+3 runtime) per unit / CI retry 2 (consumed: 0)
 - Setup reservations: none (converted to claims)
 - Active PR units: none
-- Remaining eligible units: U8=MERGED bce97aa2, U9=MERGED de6c5e03
+- Remaining eligible units: U10=MERGED 541fa27c, U11=MERGED c8e9a434, U12=MERGED 3e14240d, U13=MERGED 28dd2db5, U14=MERGED f8c0f564
 - Authority matrix: see manifest
-- Selection rule: U8 then U9
+- Selection rule: U10; then U11 and U13; U12 after U11; U14 last
 - Stop and escalation: see manifest
-- Boundary decision: S3 complete 2026-09-29; PR comment bot proven live (A9); next: design revision 4 and S4 plan per D10 (no paid services)
+- Boundary decision: S4 complete 2026-09-30; dashboard and public access live at preview-hub.cafitac.com behind Cloudflare Access (GitHub SSO + one-time PIN); next: ai-qa project planning (separate project) or further preview-hub work on user request
 
 ## Outcome
 
@@ -118,8 +118,14 @@ One command (CLI, later a PR comment) creates an isolated environment that runs 
 - R7 [MUST]: CLI: up / status / list / down (and update refs).
 - R8 [SHOULD]: PR comment bot: a command in a PR comment (e.g. `/preview up backend=feat-x`) runs the hub on a self-hosted GitHub Actions runner on trading-macstudio and replies with URLs and pinned commits.
 - R9 [MUST]: hub ↔ ai-qa contract: versioned environment descriptor (URLs, services, pinned commits, readiness, test credentials) and a QA result report schema; ai-qa itself is not built here.
-- R10 [DEFERRED]: k3d and cloud runners, web dashboard, ai-qa implementation, multi-host scheduling.
+- R10 [DEFERRED]: k3d and cloud runners, web dashboard (moved to R12 in S4), ai-qa implementation, multi-host scheduling.
 - R11 [OUT_OF_SCOPE]: any Earlypay code, configuration, rules or data.
+- R12 [MUST] (S4): Web dashboard served by the hub: list environments with state, pinned commits and URLs; create an environment by choosing, per catalog service, main, a branch, or an open PR (choices read from GitHub); delete an environment. Same lifecycle and registry as the CLI; no second source of truth.
+- R13 [MUST] (S4): `pr-<n>` ref syntax (e.g. `backend=pr-4`) in CLI, bot and dashboard, resolved to the PR head commit at create time; fork and closed PRs are rejected with the same rules as the bot.
+- R14 [MUST] (S4): Public access through a cloudflared container inside the VM (outbound only, named tunnel, locally managed config.yml ingress): `preview-hub.cafitac.com` → hub dashboard; environment hostnames one level under cafitac.com with a fixed `phub-` prefix → phub-proxy; any other hostname → 404. The user creates the tunnel credentials and the DNS records (D11); nothing is installed on the host.
+- R15 [MUST] (S4): Cloudflare Access (free) protects the dashboard and every environment hostname via one application covering `preview-hub.cafitac.com` and `phub-*.cafitac.com`; the hub additionally verifies the Access JWT on every dashboard/API request, so a request that bypasses Access is refused.
+- R16 [SHOULD] (S4): PR cross-link comments: an environment created with `pr-<n>` refs posts one comment on each referenced PR (and updates it on change/removal) listing the environment URL and the other PRs, exactly once per environment revision.
+- R17 [MUST] (S4): No paid services or paid Cloudflare features; no metered API calls; Mac Studio host unchanged except the existing Colima VM.
 
 ## Acceptance contract
 
@@ -132,6 +138,12 @@ One command (CLI, later a PR comment) creates an isolated environment that runs 
 - A7 (R5): The lifecycle and composition layers depend only on the runner interface; a fake runner in tests drives the full lifecycle. Evidence: automated tests.
 - A8 (R9): `status --format descriptor` emits a document that validates against the published descriptor schema; a sample report validates against the report schema. Evidence: schema tests.
 - A9 (R8): A `/preview up ...` comment on a PR in an example repository produces a reply with URLs and pinned commits; `/preview down` removes it; commands from non-collaborators are rejected. Evidence: live PR on a cafitac repository.
+- A10 (R12): From the dashboard, choosing backend=open PR #n and frontend=main creates an environment that reaches READY with the PR head commit and main commit pinned; the list shows it with URLs; deleting it from the dashboard leaves an empty label-scoped inventory. Evidence: automated tests + runtime E2E through the public hostname.
+- A11 (R13): `phub up --ref backend=pr-<n>` pins the PR head SHA; a fork, closed or missing PR is rejected with a clear message and creates nothing. Evidence: automated tests (fake GitHub) + one live check.
+- A12 (R14): With the tunnel running, `preview-hub.cafitac.com` serves the dashboard and `phub-<env>...cafitac.com` serves that environment's frontend calling its own backend; an unknown `phub-` hostname returns 404; gather/interview hostnames are unaffected. Evidence: runtime E2E from outside the tailnet + curl checks.
+- A13 (R15): Without an Access session both hostnames redirect to the Access login; a direct request to the hub without a valid Access JWT (wrong audience, expired, missing) is refused. Evidence: automated JWT tests + live curl.
+- A14 (R16): Creating, updating and deleting an environment with two `pr-<n>` refs leaves exactly one current cross-link comment per PR, and a hub restart does not duplicate it. Evidence: automated tests + live PR check.
+- A15 (R17): Regression A1–A9 still pass; host docker context stays default and no new host process exists. Evidence: runtime E2E + host readback.
 
 ## Design contract
 
@@ -176,11 +188,16 @@ One command (CLI, later a PR comment) creates an isolated environment that runs 
 - Outcome: A9 via self-hosted runner on trading-macstudio
 - Estimate: 1–2 days
 
-### S4: ai-qa handoff contract
+### S4: Central dashboard and public access
 
-- Status: PLANNED (coarse)
-- Outcome: A8 published schemas and a sample consumer check
-- Estimate: 0.5–1 day
+- Status: DONE (sprint 20260930-s4-v1)
+- Outcome: A10–A15. Provisional units: pr-ref resolution and GitHub branch/PR listing (A11); dashboard (A10); public access via cloudflared + Access JWT verification (A12, A13); PR cross-link comments (A14); live E2E and regression (A15).
+- User actions: create the named tunnel and its credentials, install them into the VM with a presence-only helper, add DNS `preview-hub` and wildcard `*` CNAME to the tunnel, and create the Access application and allow policy (all free).
+- Estimate: 3–5 days engineering; confidence medium (tunnel/Access live setup depends on user steps)
+
+### (former S4) ai-qa handoff contract
+
+- Status: DONE in S2 (A8 descriptor schema validated, U7)
 
 - Delivery bundles: none
 - QA checkpoint: runtime E2E on trading-macstudio per slice
@@ -259,6 +276,20 @@ One command (CLI, later a PR comment) creates an isolated environment that runs 
 - Normalized value: S4 scope proposal — hub web dashboard (environment list, compose by picking main/branch/open PR per service, PR cross-linking comments), `svc=pr-<n>` ref syntax, public exposure through a cloudflared container inside the VM (outbound-only) with `preview-hub.cafitac.com` (dashboard) and `*.preview.cafitac.com` (environments) behind Cloudflare Access. Requires design revision 4 (security/isolation model changes) and user-created Cloudflare tunnel credentials.
 - Confirmed at: 2026-09-29
 
+### D11: S4 hostname routing — wildcard DNS
+
+- Status: CONFIRMED
+- User answer (2026-09-29): "와일드카드 DNS (권장)" to the choice between one wildcard DNS record and per-environment DNS records created by the hub.
+- Normalized value: a single `*.cafitac.com` CNAME to the preview-hub tunnel (created by the user) plus an explicit `preview-hub` record; existing explicit records (gather, interview) keep precedence. cloudflared ingress routes `preview-hub.cafitac.com` to the hub and `phub-*` hosts to phub-proxy, everything else to 404. Access covers `preview-hub.cafitac.com` and `phub-*.cafitac.com` only (partial wildcard supported by Access). The hub holds no Cloudflare API token and creates no DNS records. Supersedes the `*.preview.cafitac.com` wording in D10 (two-level names are not covered by free Universal SSL).
+- Confirmed at: 2026-09-29
+
+### D12: Access login method — GitHub SSO added
+
+- Status: CONFIRMED
+- User answer (2026-09-30): "SSO 를 붙이는건 안되나?" then "응 GitHub 로그인으로 붙여줘".
+- Normalized value: Cloudflare Access identity providers = GitHub (OAuth app "preview-hub access" in the cafitac GitHub account) plus the existing one-time PIN as fallback; policy unchanged (Allow emails cafitac99@gmail.com); Zero Trust Free plan ($0) activated by the user's approval. No hub contract or code change (JWT verification is provider-agnostic). Free; no paid feature.
+- Confirmed at: 2026-09-30
+
 ## Open questions
 
 - None blocking planning. Design inputs listed under Design contract.
@@ -293,4 +324,14 @@ One command (CLI, later a PR comment) creates an isolated environment that runs 
 - 2026-09-29: User installed the bot token (presence checked only; a probe from the bot container printed only HTTP status 200s). An initial partial install left the running bot in a stale failure state until a container restart; fix scoped into U9. U9 reserved and claimed.
 - 2026-09-29: User set S4 direction (D10): central dashboard + public access via Cloudflare Tunnel/Access on cafitac.com, after S3 completes.
 - 2026-09-29: U9 merged (de6c5e03) after live A9 and regression E2E on f9e24b2. SPRINT_COMPLETE for 20260930-s3-v1.
+- 2026-09-29: S4 planning started; D11 wildcard DNS chosen; requirements R12–R17 and acceptance A10–A15 drafted; next: design revision 4 (STANDARD, execution style carried over: 승인 범위 내 자율).
 - 2026-09-29: D10 constraint (user): no paid Cloudflare features. Public hostnames must stay one level under cafitac.com so the free Universal SSL wildcard covers them (dashboard preview-hub.cafitac.com; environments flattened, e.g. app--pr-backend-4.cafitac.com). Existing pattern to reuse: named tunnel + config.yml ingress + cloudflared container on the app network (judge-board), but credentials inside the VM (/opt/phub/secrets), not on the host.
+- 2026-09-29: Design revision 4 produced (S4: dashboard, pr-<n>, public access, cross-links). validate_design valid; DBML parsed (7 tables); checklist review RV4-1..6 (5 accepted, 1 rejected). Awaiting Design Gate for digest 0093cda1e186286408260256f21573a131cc35c2d5e8c6aedfbdbe6185216199.
+- 2026-09-29: Design Gate approved by the user for revision 4 digest 0093cda1e186286408260256f21573a131cc35c2d5e8c6aedfbdbe6185216199 (revalidated unchanged). Next: feature-plan builds the S4 manifest.
+- 2026-09-29: S4 manifest 20260930-s4-v1 confirmed (digest 86c6c422c953e9b720732f674d0f29845dd385d2ef13e9cc07bf9d42669dd04d); SPRINT_RUNNING; U10 reserved.
+- 2026-09-29: U10 merged (541fa27c); U11 and U13 reserved and claimed in parallel (WIP 2).
+- 2026-09-29: U13 merged (28dd2db5) after review cycle 3 clean 2/2.
+- 2026-09-29: U11 merged (c8e9a434) after review cycle 4 clean 2/2 and VM smoke; U12 reserved and claimed; Cloudflare setup instructions given to the user.
+- 2026-09-29: U12 merged (3e14240d) after review cycle 3 clean 2/2. U14 waits for the user's Cloudflare setup (tunnel credentials, DNS preview-hub and *, Access application, then tunnel ID/team domain/AUD).
+- 2026-09-30: User Cloudflare setup complete (tunnel, DNS, credentials, Access Free app); U14 reserved and claimed.
+- 2026-09-30: U14 merged (f8c0f564) after live public E2E, regression E2E, the dashboard owner check through GitHub SSO, and review cycle 3 clean 2/2. SPRINT_COMPLETE for 20260930-s4-v1. VM runs the merged main.

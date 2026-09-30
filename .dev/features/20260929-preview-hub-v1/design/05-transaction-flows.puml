@@ -129,3 +129,65 @@ note over Bot, Hub
   Reply posting failures are retried on the next loop while reply_comment_id is NULL (at most 3 attempts).
 end note
 @enduml
+
+@startuml
+title Revision 4 — Create an environment from the dashboard (public)
+
+actor "Owner (browser)" as User
+participant "Cloudflare edge\n(Access, free)" as CF
+participant "phub-cloudflared\n(VM, outbound tunnel)" as Tun
+participant "phub-hub HTTP (C9)" as Web
+participant "AccessVerifier\n(JWKS cache)" as Auth
+participant "GitHubClient\n(token file, read)" as GH
+participant "phub up (child process, C5)" as CLI
+database "Registry (SQLite)" as DB
+
+User -> CF: https://preview-hub.cafitac.com
+CF -> User: Access login (email OTP) if no session
+CF -> Tun: request + Cf-Access-Jwt-Assertion
+Tun -> Web: GET /api/catalog
+Web -> Auth: verify(jwt) (RS256, aud, iss, exp)
+alt invalid / missing / config missing
+  Web --> User: 403 (fail closed)
+end
+Web -> GH: list branches + open PRs per catalog repo (60 s cache)
+Web --> User: choices (main / branch / PR #n)
+User -> Web: POST /api/environments {services: {backend: "pr-4", frontend: "main"}}
+Web -> Auth: verify(jwt); check Origin == dashboard host
+Web -> CLI: spawn phub up c-x7k2qa --set backend=pr-4 --set frontend=main\n(requested_by web:<email>)
+CLI -> GH: GET pulls/4 -> open, same repo -> head.sha
+CLI -> DB: same create flow as above (lock, pins, build, start)
+Web --> User: 202 {name}
+User -> Web: GET /api/environments/c-x7k2qa (poll)
+Web -> DB: read state / pins / URLs
+Web --> User: READY, https://phub-c-x7k2qa.cafitac.com
+@enduml
+
+@startuml
+title Revision 4 — PR cross-link reconcile (phub-bot loop, every interval)
+
+participant "phub-bot" as Bot
+database "Registry (SQLite)" as DB
+participant "GitHub API" as GH
+
+Bot -> DB: active environments whose services use requested_ref pr-<n>\n+ pr_links rows
+loop each (env, repo, pr) wanted but missing or rendered_version < env.version
+  alt comment_id is null
+    Bot -> GH: POST issue comment (marker <!-- phub-link env=... -->)
+    Bot -> DB: txn: set comment_id, rendered_version, status ACTIVE, attempts 0
+  else
+    Bot -> GH: PATCH comment body
+    Bot -> DB: txn: rendered_version = env.version
+  end
+end
+loop each ACTIVE row whose environment is DELETED / gone
+  Bot -> GH: PATCH comment "preview <env>: removed"
+  Bot -> DB: status REMOVED
+end
+note right of Bot
+  Failure: attempts += 1, retried next loop (no state change elsewhere).
+  Crash between POST and txn: next loop searches the PR's comments
+  for the marker before posting again (no duplicate).
+end note
+@enduml
+

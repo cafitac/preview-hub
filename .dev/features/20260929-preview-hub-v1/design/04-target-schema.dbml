@@ -1,6 +1,6 @@
 Project target_schema {
   database_type: 'SQLite'
-  Note: 'preview-hub v1 environment registry (/state/state.db on the phub-state volume inside the preview-hub Colima VM). Schema revision 2 (revision 3 of the design adds the bot tables; migration 0002). Application-level invariants are marked [app]; the rest is enforced by SQLite.'
+  Note: 'preview-hub v1 environment registry (/state/state.db on the phub-state volume inside the preview-hub Colima VM). Schema revision 3 (design revision 3 added the bot tables in migration 0002; design revision 4 adds pr_links in migration 0003, additive). Application-level invariants are marked [app]; the rest is enforced by SQLite.'
 }
 
 Table environments {
@@ -82,4 +82,21 @@ Table bot_cursors {
   repo text [pk]
   comments_since text [not null, note: 'UTC ISO-8601 of the newest processed comment update; polling uses since=<value> minus a 60 s overlap, deduplicated by comment_id']
   closed_checked_at text [not null, note: 'last scan of closed PRs for environment cleanup']
+}
+
+Table pr_links {
+  environment text [not null, note: 'EnvName of the linked environment']
+  repo text [not null, note: 'owner/name of the referenced PR (catalog repository)']
+  pr_number integer [not null]
+  comment_id integer [null, note: 'hub comment on the PR; null until the first post succeeds']
+  rendered_version integer [not null, default: 0, note: 'environments.version the comment body reflects; 0 = never posted']
+  status text [not null, note: 'ACTIVE|REMOVED; REMOVED once the comment says the environment was removed']
+  attempts integer [not null, default: 0, note: 'consecutive failed posts; reset on success; reconcile keeps retrying each loop']
+  updated_at text [not null]
+
+  indexes {
+    (environment, repo, pr_number) [pk, note: 'one comment per environment and PR = exactly-once identity']
+    (status) [name: 'ix_links_status']
+  }
+  Note: 'Written only by phub-bot (GitHub write authority). Rows are derived from environment_services.requested_ref values of the form pr-<n>; environments are keyed by name because names are unique among active environments and a reused name gets a fresh comment after the old row became REMOVED (row replaced).'
 }

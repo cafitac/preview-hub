@@ -43,3 +43,24 @@ flowchart LR
 - Upstream/downstream: example repositories are upstream (read only). ai-qa is downstream and only reads the descriptor and writes its own report; it never mutates environments through the hub in v1.
 - Genuine external boundaries: `GitSource` (git/GitHub), `Runner` (Docker/Compose), `GitHubApi` (S3 bot: list comments, list closed PRs, read PR head, post comment). No other adapter layers.
 - The bot is outbound-only: GitHub never connects to the VM.
+
+## Revision 4 (S4) — public access and dashboard
+
+```mermaid
+flowchart LR
+    OWNER["소유자 브라우저"] -->|"HTTPS"| EDGE["Cloudflare 엣지<br/>Access 로그인(무료)<br/>preview-hub · phub-*"]
+    EDGE -->|"터널(VM에서 바깥으로만 연결)"| CFD["phub-cloudflared (VM, 제안)"]
+    subgraph VM["Colima VM preview-hub"]
+        CFD -->|"preview-hub.cafitac.com"| HUBW["phub-hub HTTP :8080 (제안)<br/>대시보드 + JSON API<br/>Access JWT 검증"]
+        CFD -->|"*.cafitac.com"| PX["phub-proxy (Traefik)<br/>phub-&lt;env&gt; 호스트만 라우팅, 나머지 404<br/>forwardAuth → hub /auth/verify"]
+        HUBW -->|"phub up/update/down (자식 프로세스)"| LIFE["기존 수명주기·레지스트리"]
+        PX --> ENVS["환경: phub-&lt;env&gt;.cafitac.com<br/>/ = 프론트, /_svc/api = 백엔드"]
+        BOT["phub-bot"] -->|"교차 링크 코멘트(제안)"| GHAPI
+    end
+    HUBW -->|"브랜치·열린 PR 조회, pr-n 해석(읽기)"| GHAPI["GitHub API"]
+    USERCF["사용자가 만드는 것: 터널·자격 파일, DNS preview-hub + *, Access 앱"] -.-> EDGE
+```
+
+- Cloudflare is an external authority owned by the user; the hub never writes to it.
+- The dashboard is a second entry point into the same lifecycle (next to the CLI and the bot); it adds no new state authority.
+- GitHub gains read calls from `phub-hub` (listing, `pr-<n>`); writes remain in `phub-bot`.

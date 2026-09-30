@@ -157,3 +157,77 @@ ai-qa must only run against `state=READY` and `readiness.allHealthy=true`, and m
 }
 ```
 The hub does not consume reports in v1; the schema is published so ai-qa and the PR bot (later) share one format.
+
+## Revision 4 (S4): dashboard, `pr-<n>` refs and public access
+
+All revision 4 changes are additive. With no `public_access` block in the catalog, every contract above behaves exactly as in revision 3 (S1–S3 evidence stays valid).
+
+### C2 (extended). Catalog `public_access`
+
+```yaml
+public_access:                       # optional; enables public exposure (S4)
+  host_template: phub-{env}.cafitac.com   # ONE hostname per environment, one label under the zone (free Universal SSL)
+  entry_service: frontend            # served at "/" of the environment host
+  path_template: /_svc/{subdomain}   # every other exposed service; prefix stripped before the container
+  dashboard_host: preview-hub.cafitac.com
+```
+
+- `${services.<name>.public_url}` becomes `https://phub-<env>.cafitac.com` for the entry service and `https://phub-<env>.cafitac.com/_svc/<subdomain>` for other exposed services. All services of one environment therefore share one origin, so the browser sends the Cloudflare Access cookie to API calls and no CORS preflight crosses hosts.
+- Local routes from `public_url_template` (`<subdomain>.<env>.localhost:18080`) remain as additional proxy routes for SSH-forward debugging and in-VM consumers; they are not injected into services when `public_access` is set.
+- Rejected alternative: one hostname per service (`phub-<env>--api...`). Cross-host API calls would not carry the Access cookie of the API host, so the frontend's first fetch would be redirected to the Access login and fail CORS.
+- The hub validates at start that `host_template` yields exactly one DNS label (`^phub-[a-z0-9-]+$` before the zone) no longer than 63 characters for the maximum EnvName length.
+
+### C3 (extended). `pr-<n>` ref syntax
+
+- A ref matching `^pr-[1-9][0-9]{0,6}$` names the open pull request `<n>` of that service's repository. Branch names of this exact form are therefore not addressable by name (use the commit SHA instead).
+- Resolution (GitHub REST `GET /repos/{repo}/pulls/{n}`): the PR must exist, be `open`, and have `head.repo.full_name == base.repo.full_name` (no forks). The pin is `head.sha` at resolution time; `requested_ref` stores `pr-<n>`. `update` re-resolves it to the current head.
+- Errors (exit 2, nothing created): not found, closed/merged, fork, token missing/unauthorized. The bot's own PR-head pinning (C6) uses the same resolver.
+- Same syntax in CLI (`--set backend=pr-4`), bot (`/preview up frontend=pr-7`) and dashboard.
+
+### C9. Hub HTTP server (dashboard + JSON API)
+
+Served by `phub serve` inside `phub-hub` on in-network port 8080 (never published to the host). Only `cloudflared` and `phub-proxy` reach it.
+
+| Method and path | Purpose |
+|---|---|
+| `GET /` | Dashboard HTML: environment list (state, pinned commits, URLs, TTL) and the compose form |
+| `GET /api/catalog` | Services with default ref, branches (up to 100, newest first) and open non-fork PRs (number, title, head ref, head SHA); cached 60 s |
+| `GET /api/environments` | Active environments (registry read) |
+| `GET /api/environments/{name}` | One environment; `?format=descriptor` returns C7 |
+| `POST /api/environments` | `{name?, services: {svc: ref}, ttl?}` → starts `phub up` asynchronously, 202 with the name; name defaults to `c-<6 base32>` |
+| `POST /api/environments/{name}/update` | `{services: {svc: ref}}` → `phub update` |
+| `DELETE /api/environments/{name}` | → `phub down` |
+| `GET /auth/verify` | Traefik forwardAuth target for public environment routes: 200 if the forwarded request carries a valid Access JWT, else 401 |
+| `GET /healthz` | Unauthenticated liveness (container health only) |
+
+- Authentication: every path except `/healthz` requires the `Cf-Access-Jwt-Assertion` header, verified as RS256 against the team JWKS (`https://<team>.cloudflareaccess.com/cdn-cgi/access/certs`, cached 1 h, refreshed on unknown `kid`), `aud` = configured application AUD tag, `iss` = team domain, `exp`/`nbf` checked with 60 s leeway. Missing configuration → every request refused (fail closed). The identity (`email` claim) becomes `requested_by = web:<email>`.
+- Mutations (`POST`, `DELETE`) also require `Origin` equal to `https://<dashboard_host>` (CSRF guard) and `Content-Type: application/json`.
+- Mutations run the same CLI entry point as a detached child process (`phub up|update|down ...`), so the lock, capacity/disk guards, operations table and exit codes are identical to C5. Exit 3/4/2 are surfaced when they happen within the first 2 s; later results are visible through the environment state.
+- Configuration (non-secret, VM file `/opt/phub/public.env`): `PHUB_ACCESS_TEAM_DOMAIN`, `PHUB_ACCESS_AUD`, `PHUB_TUNNEL_ID`.
+
+### C10. Public ingress (`cloudflared`, locally managed)
+
+Container `phub-cloudflared` (image `cloudflare/cloudflared`, pinned tag) in the hub stack, Compose profile `public`, started only when the credentials file exists. Outbound-only; no published port.
+
+```yaml
+tunnel: ${PHUB_TUNNEL_ID}
+credentials-file: /etc/cloudflared/tunnel.json      # /opt/phub/secrets/tunnel.json in the VM, read-only
+ingress:
+  - hostname: preview-hub.cafitac.com
+    service: http://phub-hub:8080
+  - hostname: "*.cafitac.com"
+    service: http://phub-proxy:80                   # Traefik routes only phub-<env> hosts; others 404
+  - service: http_status:404
+```
+
+User-owned Cloudflare objects (free plan), created once: named tunnel + credentials (installed with `scripts/tunnel-credentials`, presence-only check like `bot-token`); DNS CNAME `preview-hub` and `*` → `<tunnel-id>.cfargotunnel.com` (proxied); one Access self-hosted application with destinations `preview-hub.cafitac.com` and `phub-*.cafitac.com`, policy Allow for the owner's email. Explicit DNS records (gather, interview) keep precedence over the wildcard.
+
+Proxy routes per exposed service (ComposeRunner labels): router `<env>-<svc>-local` (Host `<subdomain>.<env>.localhost`, unchanged) and router `<env>-<svc>-public` (Host `phub-<env>.cafitac.com` [+ `PathPrefix(/_svc/<subdomain>)` with StripPrefix]) with the forwardAuth middleware → `http://phub-hub:8080/auth/verify`.
+
+### C6 (extended). Cross-link comments
+
+For every active environment that pins at least one `pr-<n>` ref, the bot keeps exactly one hub comment on each referenced PR (except the PR whose `/preview` command created the environment, which already has its reply). Body: first line `preview <env>: <STATE>` (marker `<!-- phub-link env=<env> -->`), the environment URL and a table service | ref | commit (12 hex). The comment is edited when the environment version changes and edited to `preview <env>: removed` after deletion. Requires token permission Pull requests/Issues write (already granted).
+
+### C7 (extended). Descriptor
+
+Optional additions (schema stays `preview-hub/v1`): `services[].localUrl` (the `.localhost` route) and `access: {"provider": "cloudflare-access"}` when public access is enabled. `entryUrl`/`publicUrl` carry the public URLs in that case.

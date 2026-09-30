@@ -1,6 +1,6 @@
 # Acceptance trace
 
-PR units are provisional names; `feature-plan` fixes them from this design (U-BE example backend, U-FE example frontend, U-CORE hub contracts + registry + lifecycle with FakeRunner, U-RUN ComposeRunner + proxy + runtime E2E, U-N notifier (S2), U-BOT PR bot (S3), U-QA descriptor/report schemas (S4)).
+PR units are provisional names; `feature-plan` fixes them from this design (U-BE example backend, U-FE example frontend, U-CORE hub contracts + registry + lifecycle with FakeRunner, U-RUN ComposeRunner + proxy + runtime E2E, U-N notifier (S2), U-BOT PR bot (S3), U-QA descriptor/report schemas (done in S2 as U7)). Revision 4 provisional units: U10 pr-ref + GitHub client, U11 public access (routes, verifier, cloudflared), U12 dashboard, U13 cross-link comments, U14 live E2E.
 
 | Acceptance ID | Design flow / artifact | Persisted effect and invariant | Automated evidence | Runtime evidence | Rollback evidence | PR unit |
 |---|---|---|---|---|---|---|
@@ -13,3 +13,10 @@ PR units are provisional names; `feature-plan` fixes them from this design (U-BE
 | A7 | 02 Runner interface; 11 C4 | lifecycle imports Runner only | unit: full lifecycle with FakeRunner; import-boundary test | n/a | n/a | U-CORE |
 | A8 | 11 C7, C8 | none | schema tests: descriptor from a READY env validates; sample report validates | `status --format descriptor` on a live env validates | n/a | U-QA |
 | A9 | 11 C6; 05 bot sequence; 07 bot section; 04 bot_comments/bot_cursors | one bot_comments row per comment (PK), one reply; operations.requested_by gh:<login>#<pr> | unit: grammar, authorization (association, fork, closed), dedup, cursor overlap, reply formatting, closed-PR sweep with a fake GitHubApi and fake hub exec | live PR on preview-example-backend: `/preview up` reply with URLs + head SHA; `/preview status`; `/preview down`; PR close removes the environment; a fork PR / non-collaborator comment is refused (simulated via fixtures if a second account is unavailable) | `/preview down`, PR close | U8 bot, U9 live E2E |
+| A10 | 11 C9; 05 rev4 dashboard flow; 07 rev4 authority | same environments/operations rows as CLI (requested_by web:<email>) | unit: HTTP API with fake verifier + fake child runner; catalog listing with fake GitHub | public: create backend=PR #n + frontend=main from the dashboard, READY, URL opens, delete → empty inventory | delete from dashboard | U12 dashboard, U14 live |
+| A11 | 11 C3 extended | requested_ref pr-<n>, commit_sha = head.sha | unit: resolver (open, closed, fork, missing, token missing) with fake GitHub; CLI parse | live: `phub up --set backend=pr-<n>` pins head SHA | `down` | U10 |
+| A12 | 11 C2/C10; 07 security 2 | none | unit: plan builds one-origin URLs and local+public routers; host_template validation | outside tailnet: dashboard host serves, env host serves frontend calling its API under /_svc/api, unknown phub- host 404, gather/interview unchanged | stop public profile | U11 public access, U14 |
+| A13 | 11 C9 auth; 07 security 3–4 | none | unit: JWT valid / wrong aud / expired / wrong iss / unknown kid / missing config / bad Origin | live curl without session → Access redirect; in-VM request to hub and proxy public route without JWT → 401/403 | n/a | U11, U14 |
+| A14 | 11 C6 extended; 04 pr_links; 05/06 rev4 | one pr_links row + one comment per (env, PR) | unit: reconcile create/edit/remove, crash-after-post marker search, restart no duplicate (fake GitHub) | live: env with two pr refs → one comment each; update edits; down → "removed" | `down` | U13 cross-link |
+| A15 | 07 rev4 migration/rollback | migration 0003 additive | full test suite | A1–A9 E2E (run.sh, bot.sh) pass; host docker context default; no new host process | n/a | U14 |
+
