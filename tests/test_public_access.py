@@ -330,3 +330,11 @@ def test_update_applies_catalog_url_changes_without_new_commits(
     monkeypatch.setattr(ctx.runner, "apply", original_apply)
     assert main(["update", "demo", "--set", "backend=main"], ctx) == 0
     assert not any(s.changed for s in ctx.runner.plans["demo"].services)
+
+
+def test_deployed_catalog_enables_approved_public_access():
+    data = yaml.safe_load(Path("deploy/hub-stack/catalog.yaml").read_text())
+    catalog = Catalog.parse(data)
+    assert data["public_access"] == ACCESS
+    assert catalog.public_access is not None
+    assert catalog.public_url_template == "http://{subdomain}.{env}.localhost:18080"

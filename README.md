@@ -129,6 +129,20 @@ image. `phub logs` includes application stdout and stderr. U3 persists its healt
 failure message in `last_error.log_excerpt`; retrieve full application logs with
 `phub logs` before deleting a failed environment.
 
+### Quick start
+
+The checked-in `deploy/hub-stack/catalog.yaml` targets the cafitac.com deployment
+and enables `public_access`. Complete the Cloudflare setup in **Public access**
+(including `/opt/phub/public.env` and the tunnel) before using it; otherwise
+services receive unreachable `https://phub-<env>.cafitac.com/...` URLs. To run
+without public access, remove the `public_access` block from that catalog in the
+ref you deploy; local URLs are then injected as before.
+
+When public access is enabled, open environments through their public URL
+(`https://phub-demo.cafitac.com` below). The SSH-forward `.localhost` frontend
+still calls the Access-protected public origin; those local routes remain for
+API debugging and in-VM consumers only.
+
 From a MacBook with SSH access to the Mac Studio (Colima and Docker CLI already
 available there):
 
@@ -136,7 +150,8 @@ available there):
 scripts/vm-bootstrap.sh <published-git-ref> [https://github.com/cafitac/preview-hub.git]
 scripts/phub up demo --set backend=main --set frontend=main
 scripts/phub tunnel
-# In another terminal, open http://app.demo.localhost:18080
+# Without public_access, open http://app.demo.localhost:18080
+# With public_access, open https://phub-demo.cafitac.com
 scripts/phub status demo --format descriptor
 scripts/phub inventory demo
 scripts/phub down demo
@@ -344,9 +359,13 @@ permission.
 
 ## Public access (Cloudflare, free)
 
-Public access is optional. Without `public_access` in the catalog, existing local
-URLs and routing stay unchanged. The hub and tunnel publish no host ports; local
-SSH-forward debugging still uses the proxy's loopback port 18080.
+Public access is optional, but the checked-in deploy catalog enables it for the
+cafitac.com deployment. Without the Cloudflare setup (including
+`/opt/phub/public.env` and a running tunnel), it injects unreachable
+`https://phub-<env>.cafitac.com/...` URLs into services. To run without public
+access, remove the `public_access` block from `deploy/hub-stack/catalog.yaml`
+in the ref you deploy; local URLs are then injected as before. The hub and tunnel
+publish no host ports; local SSH-forward debugging still uses the proxy's loopback port 18080.
 
 1. On any machine with cloudflared, authenticate to your Cloudflare account and
    run `cloudflared tunnel create preview-hub`. Keep the resulting credentials
@@ -372,8 +391,11 @@ SSH-forward debugging still uses the proxy's loopback port 18080.
    PHUB_TUNNEL_ID=your-tunnel-uuid
    ```
 
-6. Commit this optional block to `deploy/hub-stack/catalog.yaml` in the ref
-   being deployed. Do not edit only `/opt/phub/catalog.yaml` inside the VM:
+6. Enable public access by including the following block in
+   `deploy/hub-stack/catalog.yaml` in the ref being deployed (it is already checked
+   in for the cafitac.com deployment). Disable public access by removing the block
+   from that ref; local URLs are then injected as before. Do not edit only
+   `/opt/phub/catalog.yaml` inside the VM:
    every bootstrap run overwrites that file with the catalog from the
    deployed ref.
 
@@ -399,10 +421,40 @@ SSH-forward debugging still uses the proxy's loopback port 18080.
 
 The entry service uses `https://phub-<env>.cafitac.com`; other exposed services
 use paths such as `/_svc/api`, stripped before forwarding. Injected public URLs
-share that origin. Local URLs remain in descriptors as `localUrl`. Every public
+share that origin. When public access is enabled, open environments through their
+public URL: the SSH-forward `.localhost` frontend also calls the Access-protected
+public API origin. The `.localhost` routes remain for API debugging and in-VM
+consumers only. Local URLs remain in descriptors as `localUrl`. Every public
 route verifies an Access JWT at the hub; absent verifier configuration fails
 closed. `/healthz` is the only unauthenticated HTTP endpoint. This unit supplies
 the authenticated HTTP foundation; dashboard routes are added separately.
+
+### Public access E2E
+
+After deploying the tested ref with `scripts/vm-bootstrap.sh <ref>` and configuring
+Cloudflare Access, run `e2e/public.sh` from the MacBook with `gh`, `jq`, `python3`,
+`curl` and SSH access. It uses `scripts/phub` and `PHUB_SSH_OPTS`; Docker probes
+run only over SSH against `colima-preview-hub`. Set `PHUB_BOT_INTERVAL` to the
+deployed interval (default 20 seconds). Set `PHUB_ACCESS_TEAM_DOMAIN` to the
+Access team hostname (default `cafitac.cloudflareaccess.com`, the checked-in
+deployment); use a hostname without a scheme, port or path.
+
+The script checks tunnel readiness, unauthenticated Access redirects, and that
+gather/interview still return HTTP 200 without an Access redirect. It also checks
+in-VM JWT enforcement and local routing. It creates temporary `e2e/pub-*` branches
+and PRs in both example repositories, verifies PR
+head pins and exactly one cross-link comment per PR, then verifies update and
+removal edits. Its exit trap removes test environments, asserts empty label
+inventories, closes PRs and deletes its branches. It never prints credentials or
+follows public redirects. The missing-PR check uses a process-specific
+`pub-bad-<pid>` name; the script refuses to adopt any pre-existing test environment.
+Run `e2e/run.sh` and `e2e/bot.sh` separately for regression coverage.
+
+The owner must also open `https://preview-hub.cafitac.com`, create an environment
+with an open backend PR and frontend `main`, open its public URL and check the
+frontend/API, then delete it and confirm its inventory is empty with
+`scripts/phub inventory <name>`. Record this browser result separately; the script
+prints the instruction but does not automate or claim the manual check.
 
 ## Dashboard
 

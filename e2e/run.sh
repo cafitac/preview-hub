@@ -63,7 +63,9 @@ endpoint=/api/notes request "api.$a.localhost" > "$work/a.json"
 endpoint=/api/notes request "api.$b.localhost" > "$work/b.json"
 python3 -c 'import json,sys; a,b=[json.load(open(p)) for p in sys.argv[1:3]]; assert any(n["text"]==sys.argv[3] for n in a); assert not any(n["text"]==sys.argv[3] for n in b)' "$work/a.json" "$work/b.json" "$prefix"
 for env in "$a" "$b"; do
-    endpoint=/config.js request "app.$env.localhost" | python3 -c 'import sys; assert sys.argv[1] in sys.stdin.read()' "http://api.$env.localhost:18080"
+    "$phub" status "$env" --format json > "$work/config-status.json"
+    api_url=$(python3 -c 'import json,sys; print(next(s["public_url"] for s in json.load(open(sys.argv[1]))["services"] if s["service"]=="backend"))' "$work/config-status.json")
+    endpoint=/config.js request "app.$env.localhost" | python3 -c 'import sys; assert sys.argv[1] in sys.stdin.read()' "$api_url"
 done
 inventory 'after A2 / before A3'
 "$phub" down "$a" --format json
