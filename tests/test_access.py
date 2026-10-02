@@ -184,3 +184,118 @@ def test_jwks_fetch_has_timeout_and_refuses_redirects(monkeypatch):
         )
         is None
     )
+
+
+def service_token(keys, claims=None):
+    payload = jwt.decode(token(keys, claims), options={"verify_signature": False})
+    del payload["email"]
+    return jwt.encode(payload, keys[0], algorithm="RS256", headers={"kid": "first"})
+
+
+def test_service_identity_allowlist(keys, monkeypatch):
+    from preview_hub.access import SERVICE_IDENTITY_CLAIM
+
+    monkeypatch.setenv("PHUB_ACCESS_SERVICE_TOKENS", " first-client, ,second-client ")
+    check = verifier(keys)
+    human = check.verify(token(keys, {SERVICE_IDENTITY_CLAIM: "unknown"}))
+    assert human.kind == "human"
+    assert human.service_id is None
+    service = check.verify(
+        service_token(keys, {SERVICE_IDENTITY_CLAIM: "first-client"})
+    )
+    assert service.kind == "service"
+    assert service.email is None
+    assert service.service_id == "first-client"
+
+
+@pytest.mark.parametrize("allowlist", [None, "", "other-client", "first-client"])
+@pytest.mark.parametrize("claim", [None, "unknown", "first-client", [], ""])
+def test_service_identity_rejections(keys, monkeypatch, allowlist, claim):
+    from preview_hub.access import SERVICE_IDENTITY_CLAIM
+
+    if allowlist is None:
+        monkeypatch.delenv("PHUB_ACCESS_SERVICE_TOKENS", raising=False)
+    else:
+        monkeypatch.setenv("PHUB_ACCESS_SERVICE_TOKENS", allowlist)
+    claims = {} if claim is None else {SERVICE_IDENTITY_CLAIM: claim}
+    encoded = service_token(keys, claims)
+    if allowlist == claim == "first-client":
+        assert verifier(keys).verify(encoded).kind == "service"
+    else:
+        with pytest.raises(AccessDenied, match="service_not_allowed"):
+            verifier(keys).verify(encoded)
+
+
+def test_service_route_boundary(keys, monkeypatch, ctx, caplog):
+    from starlette.testclient import TestClient
+
+    from preview_hub.access import SERVICE_IDENTITY_CLAIM
+    from preview_hub.web.dashboard import Dashboard
+    from preview_hub.web.server import create_app
+
+    class EmptyGitHub:
+        def list_branches(self, repo):
+            return []
+
+        def list_open_prs(self, repo):
+            return []
+
+    monkeypatch.setenv("PHUB_ACCESS_SERVICE_TOKENS", "first-client")
+    app = create_app(verifier(keys), dashboard=Dashboard(ctx, EmptyGitHub()))
+    # A successful synthetic mutation proves middleware permits humans and
+    # blocks services before any mutation handler runs.
+    from starlette.responses import PlainTextResponse
+    from starlette.routing import Route
+
+    mutations = []
+
+    def mutate(request):
+        mutations.append(request.state.identity.kind)
+        return PlainTextResponse("mutated")
+
+    app.router.routes.append(Route("/mutation", mutate, methods=["POST"]))
+    human = {"Cf-Access-Jwt-Assertion": token(keys)}
+    service = {
+        "Cf-Access-Jwt-Assertion": service_token(
+            keys, {SERVICE_IDENTITY_CLAIM: "first-client"}
+        )
+    }
+    with TestClient(app) as client, caplog.at_level("INFO"):
+        assert client.get("/healthz").status_code == 200
+        assert client.get("/healthz", headers=service).status_code == 200
+        for path in ("/auth/verify", "/", "/api/environments", "/api/catalog"):
+            assert client.get(path, headers=human).status_code == 200
+        assert client.post("/mutation", headers=human).status_code == 200
+        assert client.get("/auth/verify", headers=service).status_code == 200
+        for method, path in (
+            ("GET", "/"),
+            ("GET", "/api/environments"),
+            ("GET", "/api/catalog"),
+            ("POST", "/api/environments"),
+            ("POST", "/mutation"),
+            ("POST", "/auth/verify"),
+            ("GET", "/auth/verify/"),
+        ):
+            response = client.request(method, path, headers=service)
+            assert response.status_code == 403
+            assert response.text == "service_forbidden_route"
+        rejected = {
+            "Cf-Access-Jwt-Assertion": service_token(
+                keys, {SERVICE_IDENTITY_CLAIM: "other-client"}
+            )
+        }
+        assert client.get("/auth/verify", headers=rejected).status_code == 401
+    assert mutations == ["human"]
+    assert "service_forbidden_route" in caplog.text
+    assert service["Cf-Access-Jwt-Assertion"] not in caplog.text
+
+
+def test_stack_service_allowlist_wiring():
+    from pathlib import Path
+
+    import yaml
+
+    stack = yaml.safe_load(Path("deploy/hub-stack/compose.yaml").read_text())
+    hub = stack["services"]["hub"]
+    assert "PHUB_ACCESS_SERVICE_TOKENS" not in hub["environment"]
+    assert {"path": "/opt/phub/public.env", "required": False} in hub["env_file"]
