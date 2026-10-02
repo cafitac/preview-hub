@@ -10,17 +10,21 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from http.client import HTTPException
-from typing import Any, cast
+from typing import Any, Literal, cast
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 import jwt
 
 from .contracts import is_hostname
 
+SERVICE_IDENTITY_CLAIM = "common_name"
+
 
 @dataclass(frozen=True)
 class Identity:
-    email: str
+    email: str | None = None
+    kind: Literal["human", "service"] = "human"
+    service_id: str | None = None
 
 
 class AccessDenied(ValueError):
@@ -63,6 +67,11 @@ class AccessVerifier:
         )
         self.audience = (
             os.environ.get("PHUB_ACCESS_AUD", "") if audience is None else audience
+        )
+        self.service_tokens = frozenset(
+            value.strip()
+            for value in os.environ.get("PHUB_ACCESS_SERVICE_TOKENS", "").split(",")
+            if value.strip()
         )
         self.fetcher, self.clock = fetcher, clock
         self._keys: dict[str, jwt.PyJWK] = {}
@@ -134,9 +143,14 @@ class AccessVerifier:
                 options={"require": ["exp", "iat", "aud", "iss"]},
             )
             email = claims.get("email")
-            if not isinstance(email, str) or not email.strip():
-                raise AccessDenied("malformed")
-            return Identity(email)
+            if "email" in claims:
+                if not isinstance(email, str) or not email.strip():
+                    raise AccessDenied("malformed")
+                return Identity(email=email)
+            service_id = claims.get(SERVICE_IDENTITY_CLAIM)
+            if not isinstance(service_id, str) or service_id not in self.service_tokens:
+                raise AccessDenied("service_not_allowed")
+            return Identity(kind="service", service_id=service_id)
         except jwt.InvalidAudienceError:
             raise AccessDenied("bad_audience") from None
         except jwt.InvalidIssuerError:

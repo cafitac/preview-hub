@@ -388,6 +388,7 @@ publish no host ports; local SSH-forward debugging still uses the proxy's loopba
    ```dotenv
    PHUB_ACCESS_TEAM_DOMAIN=example.cloudflareaccess.com
    PHUB_ACCESS_AUD=your-application-aud-tag
+   PHUB_ACCESS_SERVICE_TOKENS=
    PHUB_TUNNEL_ID=your-tunnel-uuid
    ```
 
@@ -428,6 +429,27 @@ consumers only. Local URLs remain in descriptors as `localUrl`. Every public
 route verifies an Access JWT at the hub; absent verifier configuration fails
 closed. `/healthz` is the only unauthenticated HTTP endpoint. This unit supplies
 the authenticated HTTP foundation; dashboard routes are added separately.
+
+### Service identities
+
+Cloudflare Access service tokens require a Service Auth policy on the application.
+Set `PHUB_ACCESS_SERVICE_TOKENS` in `/opt/phub/public.env` to comma-separated
+client IDs (non-secret), then recreate the hub through the deployment procedure.
+Whitespace around entries is ignored; unset or empty allows no service identities.
+Keep client secrets out of this file.
+
+Verified RS256 JWTs with an email remain human identities. JWTs without email
+require an allowlisted client ID in the `common_name` claim, defined by
+`SERVICE_IDENTITY_CLAIM` in `preview_hub/access.py`. This expected claim name must
+be confirmed by a live probe with the owner-created token before merge; synthetic
+tests do not confirm Cloudflare’s live claim shape. Record claim names only.
+
+Service identities may access only `GET /auth/verify`, used by Traefik forwardAuth
+for environment routes. Dashboard pages, APIs and mutations return 403 with
+`service_forbidden_route` in the response body. Unallowlisted or missing service
+claims return 401 with `unauthorized` in the response body and log the reason
+`service_not_allowed` on the server. `GET /healthz` remains open. Emptying the
+allowlist disables service access.
 
 ### Public access E2E
 
