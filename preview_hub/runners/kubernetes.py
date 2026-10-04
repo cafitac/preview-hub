@@ -304,9 +304,13 @@ def render(plan: EnvironmentPlan, auth_url: str) -> dict[str, list[dict[str, Any
     jobs = _init_jobs(ns, plan)
     for service in plan.services:
         labels = {**service.labels, ROLE: "service"}
+        # ⚠️ The role is part of the selector: the service's postgres and init Job pods carry
+        # the same dev.phub.service label, and without it the Service load-balanced requests
+        # onto them (2026-10-05 e2e: the API failed intermittently).
         selector = {
             "dev.phub.env": labels["dev.phub.env"],
             "dev.phub.service": service.name,
+            ROLE: "service",
         }
         container: dict[str, Any] = {
             "name": service.name,

@@ -134,6 +134,29 @@ def test_render_shape(tmp_path):
     assert "@backend--db:5432/" in url
 
 
+def test_each_selector_picks_exactly_one_workload(tmp_path):
+    """A Service or Deployment must never match pods of another workload."""
+    objects = [o for group in render(make_plan(tmp_path), AUTH).values() for o in group]
+    templates = {
+        (o["kind"], o["metadata"]["name"]): o["spec"]["template"]["metadata"]["labels"]
+        for o in objects
+        if o["kind"] in ("Deployment", "StatefulSet", "Job")
+    }
+    for o in objects:
+        if o["kind"] == "Service":
+            wanted = o["spec"]["selector"]
+        elif o["kind"] in ("Deployment", "StatefulSet"):
+            wanted = o["spec"]["selector"]["matchLabels"]
+        else:
+            continue
+        matched = [
+            key
+            for key, labels in templates.items()
+            if all(labels.get(k) == v for k, v in wanted.items())
+        ]
+        assert len(matched) == 1, (o["kind"], o["metadata"]["name"], matched)
+
+
 def test_public_routes_authenticate_and_strip(tmp_path):
     groups = render(make_plan(tmp_path), AUTH)
     backend = {(o["kind"], o["metadata"]["name"]): o for o in groups["backend"]}
