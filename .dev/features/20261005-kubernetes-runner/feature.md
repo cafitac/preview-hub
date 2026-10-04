@@ -12,8 +12,16 @@
 
 | 단위 | 내용 | 상태 |
 | --- | --- | --- |
-| K1 | `runners/kubernetes.py` — render · apply · health · inventory · destroy · logs, 골든 · 가짜 실행기 테스트 | 이 PR |
-| K2 | 빌더(BuildKit Job → 클러스터 레지스트리), `phub gc` 의 이미지 정리, CLI `runner: kubernetes` 연결 · 디스크 가드 | 다음 |
+| K1 | `runners/kubernetes.py` — render · apply · health · inventory · destroy · logs, 골든 · 가짜 실행기 테스트 | 완료 #16 |
+| K2 | 빌더(BuildKit Job → 클러스터 레지스트리), `phub gc` 의 이미지 정리, CLI `runner: kubernetes` 연결 · 디스크 가드 | 이 PR |
 | K3 | bot 실행기 — `docker exec phub-hub` 대신 같은 파드에서 CLI 호출, 환경 설명(C7)의 `proxy` 값을 러너가 채움 | |
 | K4 | homelab `apps/preview-hub` — hub · bot · 레지스트리 · BuildKit, RBAC, Argo CD | |
 | K5 | 전환 — `preview-hub.cafitac.com` · `*.cafitac.com` 을 homelab 터널로, e2e(up → ai-qa → down 뒤 남는 것 없음), colima `preview-hub` 정리 | |
+
+## K2 실험 기록 (2026-10-05, homelab k3s)
+
+- k3s 노드가 docker 런타임이라 이미지는 VM 의 도커 데몬이 받는다 — 클러스터 DNS 를 모른다. 레지스트리를 `hostPort: 5000, hostIP: 127.0.0.1` 로 노드 루프백에만 열었다
+  - VM 안에 소켓이 생기지 않고(iptables DNAT) lima 도 포트를 넘기지 않는다 → Mac · LAN · tailnet 에 열리지 않는다(Mac 의 :5000 은 macOS AirPlay 수신기)
+  - 노드 도커가 `localhost:5000` 으로 push · pull 하고, 파드가 `localhost:5000/...` 이미지로 뜬다
+- 새 hub 이미지 안에서 `BuildKitBuilder` 로 preview-example-backend(544fd35) 를 클러스터 buildkitd 로 빌드 → 레지스트리 push → 두 번째 호출은 재사용 → 노드가 받아 실행(`import app.main` 성공)
+- buildkitd 는 root(privileged)로 돌린다 — `--oci-worker-no-process-sandbox` 는 rootless 에서만 된다
