@@ -13,8 +13,8 @@
 | 단위 | 내용 | 상태 |
 | --- | --- | --- |
 | K1 | `runners/kubernetes.py` — render · apply · health · inventory · destroy · logs, 골든 · 가짜 실행기 테스트 | 완료 #16 |
-| K2 | 빌더(BuildKit Job → 클러스터 레지스트리), `phub gc` 의 이미지 정리, CLI `runner: kubernetes` 연결 · 디스크 가드 | 이 PR |
-| K3 | bot 실행기 — `docker exec phub-hub` 대신 같은 파드에서 CLI 호출, 환경 설명(C7)의 `proxy` 값을 러너가 채움 | |
+| K2 | 빌더(BuildKit Job → 클러스터 레지스트리), `phub gc` 의 이미지 정리, CLI `runner: kubernetes` 연결 · 디스크 가드 | #17 |
+| K3 | bot 실행기 — `docker exec phub-hub` 대신 같은 파드에서 CLI 호출, 환경 설명(C7)의 `proxy` 값을 설정으로(`PHUB_HUB_EXEC`, `PHUB_PROXY_ADDRESS` · `_PORT`) | 이 PR |
 | K4 | homelab `apps/preview-hub` — hub · bot · 레지스트리 · BuildKit, RBAC, Argo CD | |
 | K5 | 전환 — `preview-hub.cafitac.com` · `*.cafitac.com` 을 homelab 터널로, e2e(up → ai-qa → down 뒤 남는 것 없음), colima `preview-hub` 정리 | |
 

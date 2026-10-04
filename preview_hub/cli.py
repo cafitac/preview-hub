@@ -46,6 +46,8 @@ def descriptor(
     template: str,
     local_urls: dict[str, str] | None = None,
     entry_service: str = "frontend",
+    proxy_address: str = "phub-proxy:80",
+    proxy_port: int | None = None,
 ) -> dict[str, Any]:
     services = [
         {
@@ -70,9 +72,13 @@ def descriptor(
         "createdAt": env["created_at"],
         "expiresAt": env["ttl_expires_at"],
         "entryUrl": urls.get(entry_service, next(iter(urls.values()), None)),
+        # Where the router is reachable: Compose publishes phub-proxy on a host port;
+        # on Kubernetes it is the cluster's Traefik Service (PHUB_PROXY_ADDRESS/_PORT).
         "proxy": {
-            "hostPort": urlsplit(template).port or 80,
-            "inNetworkAddress": "phub-proxy:80",
+            "hostPort": proxy_port
+            if proxy_port is not None
+            else urlsplit(template).port or 80,
+            "inNetworkAddress": proxy_address,
         },
         "services": services,
         "testAccounts": [],
@@ -101,11 +107,14 @@ def environment_descriptor(ctx: Context, result: dict[str, Any]) -> dict[str, An
                     env=result["name"],
                     subdomain=manifest.expose["subdomain"],
                 )
+    port = os.environ.get("PHUB_PROXY_PORT")
     return descriptor(
         result,
         ctx.catalog.public_url_template,
         local_urls,
         entry_service,
+        os.environ.get("PHUB_PROXY_ADDRESS") or "phub-proxy:80",
+        int(port) if port else None,
     )
 
 

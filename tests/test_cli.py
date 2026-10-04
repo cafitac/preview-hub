@@ -168,3 +168,28 @@ def test_rejected_pr_update_preserves_ready_environment(ctx, tmp_path, monkeypat
     ctx.git = source
     assert main(["update", "pr-demo", "--set", "backend=pr-4"], ctx) == 2
     assert ctx.registry.get("pr-demo") == before
+
+
+def test_descriptor_proxy_follows_runtime():
+    from preview_hub.cli import descriptor
+
+    env = {
+        "name": "demo",
+        "state": "READY",
+        "created_at": "2026-10-05T00:00:00Z",
+        "ttl_expires_at": "2026-10-06T00:00:00Z",
+        "updated_at": "2026-10-05T00:00:00Z",
+        "services": [],
+    }
+    template = "http://{subdomain}.{env}.localhost:18080"
+    # Compose: the published phub-proxy port from the template
+    assert descriptor(env, template)["proxy"] == {
+        "hostPort": 18080,
+        "inNetworkAddress": "phub-proxy:80",
+    }
+    # Kubernetes: the cluster router, given by PHUB_PROXY_ADDRESS / PHUB_PROXY_PORT
+    traefik = "traefik.kube-system.svc.cluster.local:80"
+    assert descriptor(env, template, proxy_address=traefik, proxy_port=80)["proxy"] == {
+        "hostPort": 80,
+        "inNetworkAddress": traefik,
+    }
