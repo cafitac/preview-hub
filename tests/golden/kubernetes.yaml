@@ -1,0 +1,474 @@
+shared:
+- apiVersion: v1
+  kind: Namespace
+  metadata:
+    name: phub-test-one
+    labels:
+      dev.phub.managed: 'true'
+      dev.phub.env: test-one
+      dev.phub.service: shared
+- apiVersion: v1
+  kind: ResourceQuota
+  metadata:
+    name: environment
+    namespace: phub-test-one
+    labels:
+      dev.phub.managed: 'true'
+      dev.phub.env: test-one
+      dev.phub.service: shared
+  spec:
+    hard:
+      limits.memory: 2048Mi
+      limits.cpu: '4'
+      requests.storage: 1Gi
+- apiVersion: networking.k8s.io/v1
+  kind: NetworkPolicy
+  metadata:
+    name: environment
+    namespace: phub-test-one
+    labels:
+      dev.phub.managed: 'true'
+      dev.phub.env: test-one
+      dev.phub.service: shared
+  spec:
+    podSelector: {}
+    policyTypes:
+    - Ingress
+    ingress:
+    - from:
+      - podSelector: {}
+    - from:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: kube-system
+        podSelector:
+          matchLabels:
+            app.kubernetes.io/name: traefik
+backend:
+- apiVersion: apps/v1
+  kind: StatefulSet
+  metadata:
+    name: backend--db
+    namespace: phub-test-one
+    labels:
+      dev.phub.managed: 'true'
+      dev.phub.env: test-one
+      dev.phub.service: backend
+      dev.phub.role: resource
+  spec:
+    serviceName: backend--db
+    replicas: 1
+    selector:
+      matchLabels:
+        dev.phub.env: test-one
+        dev.phub.resource: backend--db
+    template:
+      metadata:
+        labels:
+          dev.phub.managed: 'true'
+          dev.phub.env: test-one
+          dev.phub.service: backend
+          dev.phub.role: resource
+          dev.phub.resource: backend--db
+      spec:
+        enableServiceLinks: false
+        containers:
+        - name: postgres
+          image: postgres:16
+          env:
+          - name: POSTGRES_USER
+            value: preview
+          - name: POSTGRES_PASSWORD
+            value: preview
+          - name: POSTGRES_DB
+            value: preview
+          - name: PGDATA
+            value: /var/lib/postgresql/data/pgdata
+          ports:
+          - containerPort: 5432
+          readinessProbe:
+            exec:
+              command:
+              - pg_isready
+              - -U
+              - preview
+              - -d
+              - preview
+            periodSeconds: 2
+            timeoutSeconds: 2
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: '1'
+              memory: 512Mi
+          volumeMounts:
+          - name: data
+            mountPath: /var/lib/postgresql/data
+    volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          dev.phub.managed: 'true'
+          dev.phub.env: test-one
+          dev.phub.service: backend
+          dev.phub.role: resource
+      spec:
+        accessModes:
+        - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi
+- apiVersion: v1
+  kind: Service
+  metadata:
+    name: backend--db
+    namespace: phub-test-one
+    labels:
+      dev.phub.managed: 'true'
+      dev.phub.env: test-one
+      dev.phub.service: backend
+      dev.phub.role: resource
+  spec:
+    selector:
+      dev.phub.env: test-one
+      dev.phub.resource: backend--db
+    ports:
+    - port: 5432
+      targetPort: 5432
+- apiVersion: batch/v1
+  kind: Job
+  metadata:
+    name: backend--db--init-0
+    namespace: phub-test-one
+    labels:
+      dev.phub.managed: 'true'
+      dev.phub.env: test-one
+      dev.phub.service: backend
+      dev.phub.role: init
+  spec:
+    backoffLimit: 0
+    template:
+      metadata:
+        labels:
+          dev.phub.managed: 'true'
+          dev.phub.env: test-one
+          dev.phub.service: backend
+          dev.phub.role: init
+      spec:
+        restartPolicy: Never
+        enableServiceLinks: false
+        containers:
+        - name: init
+          image: phub/backend:aaaaaaaaaaaa
+          imagePullPolicy: IfNotPresent
+          command:
+          - alembic
+          - upgrade
+          - head
+          env:
+          - name: DATABASE_URL
+            value: postgresql://preview:preview@backend--db:5432/preview
+          - name: CORS_ORIGINS
+            value: https://phub-test-one.cafitac.com
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: '1'
+              memory: 512Mi
+- apiVersion: batch/v1
+  kind: Job
+  metadata:
+    name: backend--db--init-1
+    namespace: phub-test-one
+    labels:
+      dev.phub.managed: 'true'
+      dev.phub.env: test-one
+      dev.phub.service: backend
+      dev.phub.role: init
+  spec:
+    backoffLimit: 0
+    template:
+      metadata:
+        labels:
+          dev.phub.managed: 'true'
+          dev.phub.env: test-one
+          dev.phub.service: backend
+          dev.phub.role: init
+      spec:
+        restartPolicy: Never
+        enableServiceLinks: false
+        containers:
+        - name: init
+          image: phub/backend:aaaaaaaaaaaa
+          imagePullPolicy: IfNotPresent
+          command:
+          - python
+          - -m
+          - app.seed
+          env:
+          - name: DATABASE_URL
+            value: postgresql://preview:preview@backend--db:5432/preview
+          - name: CORS_ORIGINS
+            value: https://phub-test-one.cafitac.com
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: '1'
+              memory: 512Mi
+- apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: backend
+    namespace: phub-test-one
+    labels:
+      dev.phub.managed: 'true'
+      dev.phub.env: test-one
+      dev.phub.service: backend
+      dev.phub.role: service
+    annotations:
+      dev.phub.health: '{"timeout": "90s", "http": "/healthz"}'
+      dev.phub.port: '8000'
+  spec:
+    replicas: 1
+    strategy:
+      type: Recreate
+    selector:
+      matchLabels:
+        dev.phub.env: test-one
+        dev.phub.service: backend
+    template:
+      metadata:
+        labels:
+          dev.phub.managed: 'true'
+          dev.phub.env: test-one
+          dev.phub.service: backend
+          dev.phub.role: service
+        annotations:
+          dev.phub.revision: 56752964ac694cd1
+      spec:
+        enableServiceLinks: false
+        containers:
+        - name: backend
+          image: phub/backend:aaaaaaaaaaaa
+          imagePullPolicy: IfNotPresent
+          env:
+          - name: DATABASE_URL
+            value: postgresql://preview:preview@backend--db:5432/preview
+          - name: CORS_ORIGINS
+            value: https://phub-test-one.cafitac.com
+          ports:
+          - containerPort: 8000
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: '1'
+              memory: 512Mi
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            periodSeconds: 2
+            timeoutSeconds: 5
+            failureThreshold: 45
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            periodSeconds: 5
+            timeoutSeconds: 5
+- apiVersion: v1
+  kind: Service
+  metadata:
+    name: backend
+    namespace: phub-test-one
+    labels:
+      dev.phub.managed: 'true'
+      dev.phub.env: test-one
+      dev.phub.service: backend
+      dev.phub.role: service
+  spec:
+    selector:
+      dev.phub.env: test-one
+      dev.phub.service: backend
+    ports:
+    - port: 8000
+      targetPort: 8000
+- apiVersion: traefik.io/v1alpha1
+  kind: Middleware
+  metadata:
+    name: backend-auth
+    namespace: phub-test-one
+    labels:
+      dev.phub.managed: 'true'
+      dev.phub.env: test-one
+      dev.phub.service: backend
+      dev.phub.role: service
+  spec:
+    forwardAuth:
+      address: http://hub.preview-hub.svc.cluster.local:8080/auth/verify
+      trustForwardHeader: false
+- apiVersion: traefik.io/v1alpha1
+  kind: Middleware
+  metadata:
+    name: backend-strip
+    namespace: phub-test-one
+    labels:
+      dev.phub.managed: 'true'
+      dev.phub.env: test-one
+      dev.phub.service: backend
+      dev.phub.role: service
+  spec:
+    stripPrefix:
+      prefixes:
+      - /_svc/api
+- apiVersion: networking.k8s.io/v1
+  kind: Ingress
+  metadata:
+    name: backend
+    namespace: phub-test-one
+    labels:
+      dev.phub.managed: 'true'
+      dev.phub.env: test-one
+      dev.phub.service: backend
+      dev.phub.role: service
+    annotations:
+      traefik.ingress.kubernetes.io/router.middlewares: phub-test-one-backend-auth@kubernetescrd,phub-test-one-backend-strip@kubernetescrd
+      traefik.ingress.kubernetes.io/router.priority: '100'
+  spec:
+    rules:
+    - host: phub-test-one.cafitac.com
+      http:
+        paths:
+        - path: /_svc/api
+          pathType: Prefix
+          backend:
+            service:
+              name: backend
+              port:
+                number: 8000
+frontend:
+- apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: frontend
+    namespace: phub-test-one
+    labels:
+      dev.phub.managed: 'true'
+      dev.phub.env: test-one
+      dev.phub.service: frontend
+      dev.phub.role: service
+    annotations:
+      dev.phub.health: '{"timeout": "90s", "http": "/"}'
+      dev.phub.port: '8080'
+  spec:
+    replicas: 1
+    strategy:
+      type: Recreate
+    selector:
+      matchLabels:
+        dev.phub.env: test-one
+        dev.phub.service: frontend
+    template:
+      metadata:
+        labels:
+          dev.phub.managed: 'true'
+          dev.phub.env: test-one
+          dev.phub.service: frontend
+          dev.phub.role: service
+        annotations:
+          dev.phub.revision: 2749856caec573ab
+      spec:
+        enableServiceLinks: false
+        containers:
+        - name: frontend
+          image: phub/frontend:aaaaaaaaaaaa
+          imagePullPolicy: IfNotPresent
+          env:
+          - name: API_URL
+            value: https://phub-test-one.cafitac.com/_svc/api
+          ports:
+          - containerPort: 8080
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: '1'
+              memory: 512Mi
+          startupProbe:
+            httpGet:
+              path: /
+              port: 8080
+            periodSeconds: 2
+            timeoutSeconds: 5
+            failureThreshold: 45
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            periodSeconds: 5
+            timeoutSeconds: 5
+- apiVersion: v1
+  kind: Service
+  metadata:
+    name: frontend
+    namespace: phub-test-one
+    labels:
+      dev.phub.managed: 'true'
+      dev.phub.env: test-one
+      dev.phub.service: frontend
+      dev.phub.role: service
+  spec:
+    selector:
+      dev.phub.env: test-one
+      dev.phub.service: frontend
+    ports:
+    - port: 8080
+      targetPort: 8080
+- apiVersion: traefik.io/v1alpha1
+  kind: Middleware
+  metadata:
+    name: frontend-auth
+    namespace: phub-test-one
+    labels:
+      dev.phub.managed: 'true'
+      dev.phub.env: test-one
+      dev.phub.service: frontend
+      dev.phub.role: service
+  spec:
+    forwardAuth:
+      address: http://hub.preview-hub.svc.cluster.local:8080/auth/verify
+      trustForwardHeader: false
+- apiVersion: networking.k8s.io/v1
+  kind: Ingress
+  metadata:
+    name: frontend
+    namespace: phub-test-one
+    labels:
+      dev.phub.managed: 'true'
+      dev.phub.env: test-one
+      dev.phub.service: frontend
+      dev.phub.role: service
+    annotations:
+      traefik.ingress.kubernetes.io/router.middlewares: phub-test-one-frontend-auth@kubernetescrd
+      traefik.ingress.kubernetes.io/router.priority: '10'
+  spec:
+    rules:
+    - host: phub-test-one.cafitac.com
+      http:
+        paths:
+        - path: /
+          pathType: Prefix
+          backend:
+            service:
+              name: frontend
+              port:
+                number: 8080
