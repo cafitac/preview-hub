@@ -242,6 +242,7 @@ backend:
       matchLabels:
         dev.phub.env: test-one
         dev.phub.service: backend
+        dev.phub.role: service
     template:
       metadata:
         labels:
@@ -298,6 +299,7 @@ backend:
     selector:
       dev.phub.env: test-one
       dev.phub.service: backend
+      dev.phub.role: service
     ports:
     - port: 8000
       targetPort: 8000
@@ -376,6 +378,7 @@ frontend:
       matchLabels:
         dev.phub.env: test-one
         dev.phub.service: frontend
+        dev.phub.role: service
     template:
       metadata:
         labels:
@@ -430,6 +433,7 @@ frontend:
     selector:
       dev.phub.env: test-one
       dev.phub.service: frontend
+      dev.phub.role: service
     ports:
     - port: 8080
       targetPort: 8080
