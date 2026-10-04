@@ -680,6 +680,16 @@ class KubernetesRunner:
             )
         return self.inventory(env)
 
+    def gc_images(
+        self, retained: set[str], keep_per_service: int = 3
+    ) -> tuple[str, ...]:
+        collect = getattr(self.builder, "gc_images", None)
+        if collect is None:
+            return ()
+        return cast(Callable[[set[str], int], tuple[str, ...]], collect)(
+            retained, keep_per_service
+        )
+
     def logs(self, env: str, service: str, tail: int = 100) -> str:
         return self._kubectl(
             "logs",

@@ -146,6 +146,40 @@ def create_context() -> Context:
             ),
         )
         free_space = lambda: vm_free_bytes(state_dir)
+    elif runner_name == "kubernetes":
+        from .runners.buildkit import BuildKitBuilder
+        from .runners.compose import vm_free_bytes
+        from .runners.kubernetes import KubernetesRunner
+
+        poll_interval = float(os.environ.get("PHUB_HEALTH_POLL_INTERVAL", "2"))
+        if not math.isfinite(poll_interval) or poll_interval <= 0:
+            raise InvalidInput("Health poll interval must be finite and positive")
+        runner = KubernetesRunner(
+            state_dir,
+            builder=BuildKitBuilder(
+                config_override(
+                    config,
+                    "PHUB_BUILDKIT_ADDR",
+                    "buildkit_addr",
+                    "tcp://buildkitd:1234",
+                ),
+                config_override(config, "PHUB_REGISTRY", "registry", "registry:5000"),
+                config_override(
+                    config, "PHUB_REGISTRY_PULL", "registry_pull", "localhost:5000"
+                ),
+            ),
+            auth_url=config_override(
+                config,
+                "PHUB_AUTH_URL",
+                "auth_url",
+                "http://hub.preview-hub.svc.cluster.local:8080/auth/verify",
+            ),
+            hub_namespace=config_override(
+                config, "PHUB_HUB_NAMESPACE", "hub_namespace", "preview-hub"
+            ),
+        )
+        # Builds and images live in the cluster; the hub's own disk holds state and checkouts.
+        free_space = lambda: vm_free_bytes(state_dir)
     elif runner_name == "fake":
         from .runners.fake import FakeRunner
 
