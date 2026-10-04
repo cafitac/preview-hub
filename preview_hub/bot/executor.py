@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 import subprocess
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
@@ -24,14 +25,20 @@ class Result:
     data: dict[str, Any]
 
 
+# How the bot reaches the hub CLI. The Compose stack runs the bot as a sibling container;
+# on Kubernetes the bot is a sidecar in the hub pod and runs `phub` itself on the shared state.
+DEFAULT_HUB_EXEC = "docker exec phub-hub"
+
+
 class Executor:
-    def __init__(self, runner: Runner = run):
+    def __init__(self, runner: Runner = run, hub_exec: str = DEFAULT_HUB_EXEC):
         self.runner = runner
+        self.prefix = shlex.split(hub_exec)
 
     def execute(
         self, command: Command, environment: str, service: str = "", sha: str = ""
     ) -> Result:
-        args = ["docker", "exec", "phub-hub", "phub", command.action, environment]
+        args = [*self.prefix, "phub", command.action, environment]
         if command.action in {"up", "update"}:
             for key, value in sorted({**command.refs, service: sha}.items()):
                 args.extend(["--set", f"{key}={value}"])

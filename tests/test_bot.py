@@ -1176,3 +1176,23 @@ def test_link_reconcile_failure_keeps_polling(rig, monkeypatch, caplog):
     assert len(api.posts) == 1
     assert "Cross-link reconcile failed" in caplog.text
     assert "secret" not in caplog.text
+
+
+def test_executor_hub_exec_prefix():
+    seen = []
+
+    def runner(args):
+        seen.append(args)
+        return subprocess.CompletedProcess(args, 0, '{"state": "READY"}', "")
+
+    command = Command("down", {}, None)
+    Executor(runner).execute(command, "demo")
+    Executor(runner, hub_exec="").execute(command, "demo")
+    Executor(runner, hub_exec="kubectl exec -n preview-hub deploy/hub --").execute(
+        command, "demo"
+    )
+    assert [a[: a.index("phub")] for a in seen] == [
+        ["docker", "exec", "phub-hub"],
+        [],
+        ["kubectl", "exec", "-n", "preview-hub", "deploy/hub", "--"],
+    ]

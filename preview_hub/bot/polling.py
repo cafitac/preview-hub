@@ -16,7 +16,7 @@ from preview_hub.github import GitHubApi, GitHubError, UrllibGitHubApi
 from preview_hub.registry import Registry
 
 from .commands import Command, authorize, environment_name, parse_command, repository
-from .executor import Executor, Result, format_reply
+from .executor import DEFAULT_HUB_EXEC, Executor, Result, format_reply
 from .ledger import Ledger, overlap
 from .links import LinkReconciler
 
@@ -360,7 +360,13 @@ def serve(*, sleep: Callable[[float], None] = time.sleep) -> None:
         Path(config_override(config, "PHUB_STATE_DIR", "state_dir", "/state"))
     )
     api = UrllibGitHubApi()
-    bot = PollingBot(catalog, api, Executor(), Ledger(registry))
+    hub_exec = os.environ.get("PHUB_HUB_EXEC")
+    bot = PollingBot(
+        catalog,
+        api,
+        Executor(hub_exec=DEFAULT_HUB_EXEC if hub_exec is None else hub_exec),
+        Ledger(registry),
+    )
     logging.basicConfig(level=logging.INFO)
     missing_logged = False
     # A singleton lock prevents simultaneous polling and stale recovery during an
