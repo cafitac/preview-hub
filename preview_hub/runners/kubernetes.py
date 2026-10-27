@@ -207,7 +207,7 @@ def _init_jobs(ns: str, plan: EnvironmentPlan) -> dict[str, list[dict[str, Any]]
                                             "name": "init",
                                             "image": service.image,
                                             "imagePullPolicy": "IfNotPresent",
-                                            # Same as Compose's entrypoint override.
+                                            # `command` replaces the image ENTRYPOINT.
                                             "command": [str(c) for c in command],
                                             "env": _env(service.env),
                                             "resources": {
@@ -325,7 +325,7 @@ def render(plan: EnvironmentPlan, auth_url: str) -> dict[str, list[dict[str, Any
             **_probes(dict(service.manifest.health), service.port),
         }
         if service.manifest.run.get("command") is not None:
-            # Compose's `command` replaces the image CMD, which is Kubernetes' `args`.
+            # The manifest's `run.command` replaces the image CMD, which is `args` here.
             container["args"] = [str(c) for c in service.manifest.run["command"]]
         objects: list[dict[str, Any]] = []
         for resource in service.resources:
@@ -407,8 +407,8 @@ def _routes(
     url = urlsplit(public_url)
     annotations: dict[str, str] = {}
     middlewares: list[dict[str, Any]] = []
-    # With public access configured, only the authenticated public route exists: the
-    # Compose-only `.localhost` route has no meaning inside a cluster.
+    # With public access configured, only the authenticated public route exists: a
+    # `.localhost` route has no meaning inside a cluster.
     if local_url:
         auth = f"{name}-auth"
         middlewares.append(
@@ -457,8 +457,8 @@ def _routes(
                         "http": {
                             "paths": [
                                 {
-                                    # Prefix matches the path and its subtree, like the
-                                    # Compose rule Path(p) || PathPrefix(p/).
+                                    # Prefix matches the path and its subtree
+                                    # (Path(p) || PathPrefix(p/)).
                                     "path": url.path or "/",
                                     "pathType": "Prefix",
                                     "backend": {
@@ -490,7 +490,7 @@ class KubernetesRunner:
     ):
         self.state_dir, self.builder, self.auth_url = state_dir, builder, auth_url
         self.executor = executor
-        # Same role as the Docker daemon-name check: refuse to act on the wrong cluster.
+        # Refuse to act on the wrong cluster.
         try:
             self._kubectl("get", "namespace", hub_namespace, "-o", "name")
         except OSError as exc:

@@ -1,8 +1,8 @@
 # preview-hub
 
 Branch-pinned multi-repository preview environments. The hub provides contracts,
-planning, a SQLite registry, lifecycle orchestration, and fake, Compose and
-Kubernetes runners.
+planning, a SQLite registry, lifecycle orchestration, and fake and Kubernetes
+runners.
 
 ## Production runtime (Kubernetes, since 2026-10-05)
 
@@ -23,13 +23,31 @@ cluster Traefik (Ingress + Middleware) ◀── Cloudflare Tunnel (*.cafitac.co
 - Isolation: a ResourceQuota and a NetworkPolicy (same namespace and Traefik only)
   per namespace. `destroy` deletes only namespaces carrying the owner label.
 - Public routes use the same ForwardAuth (hub `/auth/verify`) and StripPrefix
-  middlewares and the same priorities as the Compose stack.
+  middlewares; the path-prefixed route outranks the entry service's catch-all route.
 - The switch was accepted with an ai-qa end-to-end run (up → scenarios → down, nothing
   left behind). The first run failed: Service selectors also matched the same service's
   postgres and init pods. The fix (#20) added a role label and a "one selector = one
   workload" test.
 
-The Compose runtime below is kept for local use and as the previous design record.
+The hub pod (`phub serve`) and the bot (`phub bot`) run as two containers of one pod
+on the same state volume and ServiceAccount, so the bot runs `phub` itself
+(`PHUB_HUB_EXEC=""`). The hub is configured through environment variables:
+
+| Variable | Meaning | Default |
+| --- | --- | --- |
+| `PHUB_RUNNER` | `fake` or `kubernetes` | `fake` |
+| `PHUB_BUILDKIT_ADDR` | BuildKit daemon | `tcp://buildkitd:1234` |
+| `PHUB_REGISTRY` / `PHUB_REGISTRY_PULL` | registry address for pushes / for node pulls | `registry:5000` / `localhost:5000` |
+| `PHUB_AUTH_URL` | ForwardAuth endpoint (hub `/auth/verify`) | `http://hub.preview-hub.svc.cluster.local:8080/auth/verify` |
+| `PHUB_HUB_NAMESPACE` | namespace the hub itself runs in (cluster sanity check) | `preview-hub` |
+| `PHUB_PROXY_ADDRESS` / `PHUB_PROXY_PORT` | router reported in environment descriptors | `phub-proxy:80` / port of the catalog URL template |
+| `PHUB_GC_INTERVAL` | seconds between GC runs of `phub serve` | `900` |
+| `PHUB_BOT_INTERVAL` | seconds between bot polls | `20` |
+| `PHUB_HEALTH_POLL_INTERVAL` | seconds between health polls | `2` |
+| `PHUB_ACCESS_TEAM_DOMAIN` / `PHUB_ACCESS_AUD` | Cloudflare Access verification | unset (fails closed) |
+
+The hub image is built by `deploy/k8s-image.sh` (tag `phub/hub:<commit>`); its
+`Dockerfile` bundles `kubectl` and `buildctl`.
 
 ## Development
 
@@ -57,9 +75,10 @@ runner: fake
 `PHUB_STATE_DIR`, `PHUB_CATALOG`, `PHUB_SOURCE_DIR` and `PHUB_RUNNER` override
 these values. An unset or empty override uses the configuration value; a missing
 or null configuration value uses the default (never the string `"None"`).
-The defaults above match the intended container mounts. The VM
-free-space guard requires 5 GiB; tests inject a free-space provider through
-`lifecycle.Context`.
+The defaults above match the intended container mounts. `runner` accepts `fake` or
+`kubernetes`; any other value (including the retired `compose`) is rejected with an
+error listing the valid runners. The free-space guard on the state volume requires
+5 GiB; tests inject a free-space provider through `lifecycle.Context`.
 
 ```sh
 phub up feat-x --set backend=feature --ttl 24h
@@ -76,7 +95,7 @@ phub gc
 PR refs use `pr-<n>` (1–7 digits, no leading zero) and pin the current head of an open, same-repository PR.
 Updates re-resolve the head. Branches literally named `pr-<n>` must be addressed by SHA.
 The hub needs `/run/secrets/github_token` for PR refs (override with
-`PHUB_GITHUB_TOKEN_FILE` for tests); the stack mounts the secrets directory read-only.
+`PHUB_GITHUB_TOKEN_FILE` for tests); the deployment mounts that single file read-only.
 
 Exit codes: 0 success, 2 invalid input, 3 busy, 4 capacity/disk guard,
 5 lifecycle failure. All commands accept `--format text|json|descriptor`;
@@ -110,7 +129,7 @@ retain registry rows but do not share fake runtime objects. Fake logs are empty.
   locks and stale-operation recovery. Builds use shared file-lock slots.
 - CLI logs and image collection are optional runner capabilities, separate from
   C4. Image collection receives active image references and retains three recent
-  images per service. A Compose runner must implement actual logs and image GC.
+  images per service. A real runner must implement actual logs and image GC.
 
 Descriptor `testAccounts` is empty: the core does not invent credentials for the
 example applications. The approved registry schema has no credential storage
@@ -120,166 +139,46 @@ before descriptors can advertise working per-environment accounts.
 The test fixtures are copies of the U1 backend and U2 frontend `preview.yaml`
 files. Tests use synthetic local Git repositories and never contact a remote.
 
-## Compose runtime (U4, production until 2026-10-05)
+## Serving and GC
 
-Production moved to Kubernetes (see above) and the Colima `preview-hub` VM was
-deleted. This section describes the Compose runner, which still works.
-
-
-The dedicated Colima profile `preview-hub` contains the hub, Traefik and every
-preview container. The host runs the VM only; no Python service or GC daemon is
-installed there. `phub-state` stores SQLite, locks and rendered Compose files;
-`phub-src` stores immutable checkouts. The hub mounts the VM Docker socket and
-refuses any daemon whose `docker info` name is not `colima-preview-hub`.
-
-`runner: compose` (or `PHUB_RUNNER=compose`) selects the real runner.
-`daemon_name` / `PHUB_DAEMON_NAME` explicitly overrides the expected name.
-The default remains `fake` for compatibility. The stack selects Compose.
 `phub serve --interval 900` runs GC immediately and every 15 minutes, including
-U3's stale-operation recovery. `PHUB_GC_INTERVAL` changes the default interval.
+stale-operation recovery; `PHUB_GC_INTERVAL` changes the default interval.
 `phub inventory [environment] --format json` exposes label-scoped runtime objects.
 Shared cached service images have service labels, not environment labels.
-
-The image defaults to UID 1000. The stack explicitly uses root because Colima's
-Docker socket is normally root-owned. The hub and bot use the same UID/GID.
-To run both as UID 1000, grant their GID socket access and make both named volumes writable, then set
-`PHUB_UID_GID=1000:<socket-gid>` when starting the stack. Socket access grants
-control of the dedicated VM regardless of UID. Use the same `PHUB_UID_GID` when
-running `scripts/vm-bootstrap.sh` and every `scripts/bot-token` install or rotation.
-Both scripts set the secrets directory owner to that UID/GID (default `0:0`)
-with mode `0700`; the token installer sets the token owner to it with mode `0400`.
-Both services need socket access and writable volumes.
-Traefik has a read-only socket mount, Docker-provider ownership constraint, and opt-in routing labels.
-
-Application and init containers use the manifest memory limit; PostgreSQL uses
-512 MiB. PostgreSQL starts and becomes healthy before ordered migration/seed
-jobs run from the service image. Only changed services and their init jobs run
-on update. HTTP health probes use `curlimages/curl:8.12.1` as disposable labelled
-containers on the environment network; command checks use Docker healthchecks.
-The Docker daemon therefore needs image-registry access, including that probe
-image. `phub logs` includes application stdout and stderr. U3 persists its health
-failure message in `last_error.log_excerpt`; retrieve full application logs with
+`phub logs` includes application stdout and stderr. The health failure message is
+persisted in `last_error.log_excerpt`; retrieve full application logs with
 `phub logs` before deleting a failed environment.
-
-### Quick start
-
-The checked-in `deploy/hub-stack/catalog.yaml` targets the cafitac.com deployment
-and enables `public_access`. Complete the Cloudflare setup in **Public access**
-(including `/opt/phub/public.env` and the tunnel) before using it; otherwise
-services receive unreachable `https://phub-<env>.cafitac.com/...` URLs. To run
-without public access, remove the `public_access` block from that catalog in the
-ref you deploy; local URLs are then injected as before.
-
-When public access is enabled, open environments through their public URL
-(`https://phub-demo.cafitac.com` below). The SSH-forward `.localhost` frontend
-still calls the Access-protected public origin; those local routes remain for
-API debugging and in-VM consumers only.
-
-From a MacBook with SSH access to the Mac Studio (Colima and Docker CLI already
-available there):
-
-```sh
-scripts/vm-bootstrap.sh <published-git-ref> [https://github.com/cafitac/preview-hub.git]
-scripts/phub up demo --set backend=main --set frontend=main
-scripts/phub tunnel
-# Without public_access, open http://app.demo.localhost:18080
-# With public_access, open https://phub-demo.cafitac.com
-scripts/phub status demo --format descriptor
-scripts/phub inventory demo
-scripts/phub down demo
-```
-
-Bootstrap only starts profile `preview-hub` (4 CPU, 8 GiB, 40 GiB), builds from the
-requested ref inside its VM, and brings up the stack. Repeating it preserves
-state/source volumes. Stack files live in `/opt/phub` inside the VM; temporary
-build files are removed. An existing running profile is preserved, so verify its
-resource settings separately if it predates this bootstrap. It never restarts,
-resizes or deletes another profile.
-
-`PHUB_SSH_HOST` defaults to `trading-macstudio`; `PHUB_SSH_OPTS` is a whitespace
-separated list of SSH options (use SSH config for values containing spaces).
-The wrapper quotes each remote argument, checks host free space before up/update
-(15 GiB minimum, exit 4), and leaves the separate VM guard at 5 GiB. Spec files
-passed with `-f` must already exist inside the hub container. The SSH tunnel binds
-local port 18080; the proxy host publication is loopback-only.
-
-### Runtime acceptance
-
-The E2E script requires local `curl`, `git`, `python3`, SSH access, published
-example branches and a bootstrapped hub. It creates unique disposable environment
-names and always attempts to delete them and verify empty inventories on exit.
-
-```sh
-E2E_ORIGINAL_SHA=<40-hex-original> E2E_MOVED_SHA=<40-hex-second> \
-  E2E_BRANCH=e2e-alt E2E_FRONTEND_BRANCH=main E2E_BROKEN_BRANCH=e2e-broken \
-  e2e/run.sh
-```
-
-After A1 creates the environment, move `e2e-alt` to the second commit **outside**
-the script. It polls the branch for up to 5 minutes (`E2E_MOVE_POLLS`, 5 seconds
-per poll) and never pushes. It verifies the original pinned SHA, isolation of
-notes and frontend configuration, deletion isolation, repeated-up idempotency,
-TTL GC, and broken-health failure cleanup. Every scenario prints before/after
-inventories. `E2E_EXISTING_TUNNEL=1` reuses an already running tunnel;
-`E2E_BACKEND_REPO` overrides the branch-observation URL. Live A1–A5 and image
-build/bootstrap require a Docker-enabled networked machine; unit tests use a fake
-executor and do not contact Docker.
-
-Teardown is destructive and must be run deliberately after saving any evidence:
-
-```sh
-# First use scripts/phub down for each environment.
-ssh trading-macstudio colima delete --profile preview-hub
-```
-
-This removes the dedicated VM and all hub state, source caches and preview data.
 
 ## Adding a service
 
 Add a root-level `preview.yaml` in the service repository following
 `schemas/service-manifest.schema.json` (build/run/health and any dependencies),
-then add one entry under `services` in `deploy/hub-stack/catalog.yaml`:
+then add one entry under `services` in `deploy/catalog.yaml`:
 
 ```yaml
 notifier: {repo: cafitac/preview-example-notifier, default_ref: main, include: on_request}
 ```
 
-No change in `preview_hub/` is needed. Apply the updated catalog to the hub stack.
+No change in `preview_hub/` is needed. The deployed copy of the catalog is the
+`catalog` ConfigMap in `cafitac/homelab` `apps/preview-hub`; keep the two in sync.
 The service name in the manifest must match its catalog key. Omit `expose` for
 internal-only services. `include: on_request` keeps the service out of ordinary
-environments; select it with `scripts/phub up demo --set notifier=main` or add it
-to a running environment with `scripts/phub update demo --set notifier=main`.
+environments; select it with `phub up demo --set notifier=main` or add it
+to a running environment with `phub update demo --set notifier=main`.
 Consumers declare an optional dependency and interpolate
 `${services.notifier.internal_url}` in their manifest environment variables;
 the variable is omitted when notifier is absent.
 
-The extended E2E retains A1–A5 and adds A6: three notes produce exactly three
-`note.created` notifications, notes work without notifier, and adding notifier
-restarts backend and delivers the next note exactly once. These scenarios use
-fresh `main` environments, so backend and notifier changes must already be merged.
-Internal notifications are read with Python's HTTP client inside the notifier
-container over SSH, using only Docker context `colima-preview-hub` and the
-wrapper's `PHUB_SSH_*` / `PHUB_REMOTE_*` configuration. Containers are selected
-by exact environment, service, role and ownership labels.
-
-A8 validates a live READY descriptor and
-`e2e/fixtures/sample-qa-report.json` against the checked-out schemas, including
-date-time formats. It uses local `python3` only if `jsonschema` imports and its
-`FormatChecker` has a `date-time` checker;
-otherwise it streams the schemas and documents to Python in `phub-hub` over
-the same SSH connection. Nothing is installed on the remote host.
-The sample is synthetic contract data, not evidence of a live QA run.
-`E2E_BASE_REF` (default `11d0aa8`) controls the printed protected-path diff.
-The exit trap deletes all six possible environment names and checks their
-label inventories are empty. Live A6/A8 require the networked runtime host;
-`pytest` validates both contracts without Docker.
+`e2e/fixtures/sample-qa-report.json` is a synthetic sample of the QA report contract;
+`pytest` validates it against the schemas in `schemas/`. It is contract data, not
+evidence of a live QA run.
 
 ## PR bot
 
 Service arguments also accept PR refs, for example `/preview up frontend=pr-7`
 or `/preview update backend=pr-4`. They pass unchanged to the hub CLI.
 
-The `phub-bot` container polls catalog repositories every 20 seconds. Set
+The `bot` container of the hub pod polls catalog repositories every 20 seconds. Set
 `PHUB_BOT_INTERVAL` to a finite positive number of seconds to change it.
 It needs no webhook or inbound port.
 
@@ -287,19 +186,11 @@ Create a **fine-grained personal access token** limited to the catalog repositor
 with **Pull requests: read and write**, **Issues: read and write**,
 **Contents: read**, and **Metadata: read** (implicit). PR conversation replies use
 the issues endpoint but require Pull requests write permission.
-Do not use the host's broad `gh` login token. From the MacBook, pipe the token from
-its secure source into `scripts/bot-token` (never put the value in an argument),
-or run `scripts/bot-token`, paste it at the hidden stdin prompt, then press Enter and Ctrl-D.
-Run `scripts/bot-token --check` to check presence without reading its contents.
-The installer uses `PHUB_SSH_HOST`, `PHUB_SSH_OPTS`, and `PHUB_REMOTE_PATH` like
-`scripts/phub`, and writes only inside the `preview-hub` VM, using sudo, mode 0400,
-at `/opt/phub/secrets/github_token`. Bootstrap creates `/opt/phub/secrets`
-with mode 0700. Both directory and installed token are owned by
-`PHUB_UID_GID` (default `0:0`); set it consistently on bootstrap, install,
-rotation, and stack startup. Compose mounts that directory read-only at `/run/secrets`.
-The stack starts without a token. The bot checks `/run/secrets/github_token` each
-loop; if absent or empty it logs `token missing` once and idles. Installing or
-rotating the token takes effect without restarting the container.
+Do not use a broad `gh` login token. The token reaches the hub pod as the Kubernetes
+Secret `hub-github`, mounted as the single file `/run/secrets/github_token`; never put
+the value in a command argument. The bot checks that file each loop; if absent or
+empty it logs `token missing` once and idles. Rotating the Secret takes effect after
+the kubelet refreshes the mounted file, without restarting the container.
 
 Post one command as the entire PR comment:
 
@@ -320,8 +211,9 @@ removes its environment on a subsequent poll; failed cleanup is retried.
 
 Only OWNER, MEMBER and COLLABORATOR comments on open, same-repository PRs in the
 catalog are allowed. Forks, closed PRs and malformed commands run nothing.
-Commands execute only through `docker exec phub-hub phub`; the mounted Docker
-socket is privileged, so this is a code restriction, not daemon-enforced isolation.
+Commands execute only as `phub <action> ...` in the hub pod (an optional
+`PHUB_HUB_EXEC` prefix can wrap them); the bot's ServiceAccount permissions bound
+what they can do in the cluster.
 The bot never includes the token in command arguments, logs, replies or its repr.
 On first start, or when a repository cursor is missing (including a recreated
 state volume), the bot initializes its comment cursor to its start time in UTC.
@@ -351,24 +243,13 @@ preview pr-backend-42: READY
 | backend | 0123456789ab | http://api.pr-backend-42.localhost:18080 |
 ```
 
-From the MacBook, run `e2e/bot.sh` to exercise up, status, repeated polling,
-down and PR-close cleanup against a temporary PR in
-`cafitac/preview-example-backend`. It requires `gh`, `jq`, `python3`, a running
-bot and working `scripts/phub` SSH access. Each GitHub command uses the
-`cafitac` owner's `gh auth token --user cafitac` credentials; it does not read
-the VM's bot token. Set `PHUB_BOT_INTERVAL` to the deployed interval if it differs
-from 20 seconds. Replies are awaited for up to three minutes and PR-close
-cleanup for two minutes. The exit trap closes the PR, removes its branch,
-runs `phub down` and verifies empty label inventory. Rejection cases are unit
-tested; the separate `e2e/run.sh` covers the existing hub regression scenarios.
+Rejection cases are unit tested.
 
-If no reply appears, first run `scripts/bot-token --check`. `token present`
-checks file presence only, not credential validity. A bot log line
-`authentication failed: repo=...` means GitHub returned 401 or a non-rate-limit
-403: check token expiry, repository access and the permissions above, then
-reinstall with `scripts/bot-token`. The installer prints `token installed` on
-success. Rate-limit responses remain retryable deferrals. Inspect the
-`phub-bot` logs inside the `preview-hub` VM without printing the secret file.
+If no reply appears, check the bot container logs (`kubectl logs -n preview-hub
+deploy/hub -c bot`). A log line `token missing` means the Secret file is absent or
+empty. A line `authentication failed: repo=...` means GitHub returned 401 or a
+non-rate-limit 403: check token expiry, repository access and the permissions above,
+then update the Secret. Rate-limit responses remain retryable deferrals.
 
 ### PR cross-link comments
 
@@ -391,45 +272,26 @@ permission.
 
 ## Public access (Cloudflare, free)
 
-Public access is optional, but the checked-in deploy catalog enables it for the
-cafitac.com deployment. Without the Cloudflare setup (including
-`/opt/phub/public.env` and a running tunnel), it injects unreachable
-`https://phub-<env>.cafitac.com/...` URLs into services. To run without public
-access, remove the `public_access` block from `deploy/hub-stack/catalog.yaml`
-in the ref you deploy; local URLs are then injected as before. The hub and tunnel
-publish no host ports; local SSH-forward debugging still uses the proxy's loopback port 18080.
+Public access is optional, but the checked-in deploy catalog (`deploy/catalog.yaml`)
+enables it for the cafitac.com deployment. Without the Cloudflare Access setup it
+injects unreachable `https://phub-<env>.cafitac.com/...` URLs into services. To run
+without public access, remove the `public_access` block from the catalog; local URLs
+are then injected as before. The tunnel and DNS are part of the homelab cluster
+(`cafitac/homelab`); the hub only verifies Access JWTs.
 
-1. On any machine with cloudflared, authenticate to your Cloudflare account and
-   run `cloudflared tunnel create preview-hub`. Keep the resulting credentials
-   JSON private; the hub needs no Cloudflare API token.
-2. In your Cloudflare zone, create proxied CNAME records `preview-hub` and `*`,
-   both pointing to `<tunnel-id>.cfargotunnel.com`. Existing explicit records
-   (such as `gather` and `interview`) take precedence over the wildcard.
-3. Create one Access self-hosted application with destinations
+1. Make sure `preview-hub.cafitac.com` and `*.cafitac.com` reach the cluster's
+   Traefik through the homelab Cloudflare Tunnel. Existing explicit records (such as
+   `gather` and `interview`) take precedence over the wildcard.
+2. Create one Access self-hosted application with destinations
    `preview-hub.cafitac.com` and `phub-*.cafitac.com`, with an Allow policy for
    your owner email. Copy its AUD tag and your team domain (for example,
    `example.cloudflareaccess.com`, without `https://`).
-4. Install the credentials from your terminal with
-   `scripts/tunnel-credentials < /path/to/credentials.json`. Alternatively run
-   the script and paste the JSON into its hidden stdin prompt. It writes only
-   `/opt/phub/secrets/tunnel.json` inside the dedicated VM, mode 0400.
-   `scripts/tunnel-credentials --check` reports presence only.
-5. Create `/opt/phub/public.env` **inside the preview-hub VM** with these
-   non-secret values:
-
-   ```dotenv
-   PHUB_ACCESS_TEAM_DOMAIN=example.cloudflareaccess.com
-   PHUB_ACCESS_AUD=your-application-aud-tag
-   PHUB_TUNNEL_ID=your-tunnel-uuid
-   ```
-
-6. Enable public access by including the following block in
-   `deploy/hub-stack/catalog.yaml` in the ref being deployed (it is already checked
-   in for the cafitac.com deployment). Disable public access by removing the block
-   from that ref; local URLs are then injected as before. Do not edit only
-   `/opt/phub/catalog.yaml` inside the VM:
-   every bootstrap run overwrites that file with the catalog from the
-   deployed ref.
+3. Give the hub both values as environment variables through the Secret
+   `hub-access`: `PHUB_ACCESS_TEAM_DOMAIN` and `PHUB_ACCESS_AUD`. Without them the
+   verifier fails closed.
+4. Enable public access by including the following block in `deploy/catalog.yaml`
+   (it is already checked in for the cafitac.com deployment) and applying the same
+   catalog to the cluster. Disable it by removing the block.
 
    ```yaml
    public_access:
@@ -439,54 +301,19 @@ publish no host ports; local SSH-forward debugging still uses the proxy's loopba
      dashboard_host: preview-hub.cafitac.com
    ```
 
-7. Run the existing `scripts/vm-bootstrap.sh <ref>` deployment procedure. It
-   starts the `public` profile only if both VM files exist. Compose reads
-   `public.env` with `--env-file` and passes the tunnel ID as the final argument
-   of `tunnel ... run <TUNNEL_ID>`: cloudflared does **not** substitute environment
-   variables in YAML. The checked-in `cloudflared.yml` intentionally has no
-   `tunnel:` field. It routes the dashboard directly to the hub and other zone
-   hosts to Traefik, with a final 404 rule. If using another zone, update its
-   two hostname rules as well as the catalog.
-8. Update existing environments with their current refs (for example,
+   If using another zone, change the hostnames in the Access application and the
+   cluster routing as well.
+5. Update existing environments with their current refs (for example,
    `phub update demo --set backend=main`) to apply public routes and injected
    URLs even when the commits have not changed.
 
 The entry service uses `https://phub-<env>.cafitac.com`; other exposed services
 use paths such as `/_svc/api`, stripped before forwarding. Injected public URLs
 share that origin. When public access is enabled, open environments through their
-public URL: the SSH-forward `.localhost` frontend also calls the Access-protected
-public API origin. The `.localhost` routes remain for API debugging and in-VM
-consumers only. Local URLs remain in descriptors as `localUrl`. Every public
+public URL. Local URLs remain in descriptors as `localUrl`. Every public
 route verifies an Access JWT at the hub; absent verifier configuration fails
 closed. `/healthz` is the only unauthenticated HTTP endpoint. This unit supplies
 the authenticated HTTP foundation; dashboard routes are added separately.
-
-### Public access E2E
-
-After deploying the tested ref with `scripts/vm-bootstrap.sh <ref>` and configuring
-Cloudflare Access, run `e2e/public.sh` from the MacBook with `gh`, `jq`, `python3`,
-`curl` and SSH access. It uses `scripts/phub` and `PHUB_SSH_OPTS`; Docker probes
-run only over SSH against `colima-preview-hub`. Set `PHUB_BOT_INTERVAL` to the
-deployed interval (default 20 seconds). Set `PHUB_ACCESS_TEAM_DOMAIN` to the
-Access team hostname (default `cafitac.cloudflareaccess.com`, the checked-in
-deployment); use a hostname without a scheme, port or path.
-
-The script checks tunnel readiness, unauthenticated Access redirects, and that
-gather/interview still return HTTP 200 without an Access redirect. It also checks
-in-VM JWT enforcement and local routing. It creates temporary `e2e/pub-*` branches
-and PRs in both example repositories, verifies PR
-head pins and exactly one cross-link comment per PR, then verifies update and
-removal edits. Its exit trap removes test environments, asserts empty label
-inventories, closes PRs and deletes its branches. It never prints credentials or
-follows public redirects. The missing-PR check uses a process-specific
-`pub-bad-<pid>` name; the script refuses to adopt any pre-existing test environment.
-Run `e2e/run.sh` and `e2e/bot.sh` separately for regression coverage.
-
-The owner must also open `https://preview-hub.cafitac.com`, create an environment
-with an open backend PR and frontend `main`, open its public URL and check the
-frontend/API, then delete it and confirm its inventory is empty with
-`scripts/phub inventory <name>`. Record this browser result separately; the script
-prints the instruction but does not automate or claim the manual check.
 
 ## Dashboard
 

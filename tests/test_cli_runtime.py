@@ -1,4 +1,6 @@
+import ast
 import json
+from pathlib import Path
 
 import pytest
 
@@ -6,8 +8,10 @@ from preview_hub.cli import create_context, main
 
 
 @pytest.mark.parametrize("interval,expected", [(None, 2), ("0.5", 0.5)])
-def test_compose_config_wires_disk_provider(tmp_path, monkeypatch, interval, expected):
-    from preview_hub.runners import compose
+def test_kubernetes_config_wires_disk_provider(
+    tmp_path, monkeypatch, interval, expected
+):
+    from preview_hub.runners import kubernetes
     from preview_hub.runners.fake import FakeRunner
 
     monkeypatch.delenv("PHUB_HEALTH_POLL_INTERVAL", raising=False)
@@ -15,19 +19,45 @@ def test_compose_config_wires_disk_provider(tmp_path, monkeypatch, interval, exp
         monkeypatch.setenv("PHUB_HEALTH_POLL_INTERVAL", interval)
     calls = []
 
-    def factory(state_dir, daemon_name):
-        calls.append((state_dir, daemon_name))
+    def factory(state_dir, builder, auth_url, hub_namespace):
+        calls.append((state_dir, hub_namespace))
         return FakeRunner()
 
-    monkeypatch.setattr(compose, "ComposeRunner", factory)
-    monkeypatch.setenv("PHUB_RUNNER", "compose")
+    monkeypatch.setattr(kubernetes, "KubernetesRunner", factory)
+    monkeypatch.setenv("PHUB_RUNNER", "kubernetes")
     monkeypatch.setenv("PHUB_STATE_DIR", str(tmp_path))
-    monkeypatch.setenv("PHUB_CATALOG", "deploy/hub-stack/catalog.yaml")
-    monkeypatch.setenv("PHUB_DAEMON_NAME", "expected-daemon")
+    monkeypatch.setenv("PHUB_CATALOG", "deploy/catalog.yaml")
+    monkeypatch.setenv("PHUB_HUB_NAMESPACE", "expected-namespace")
     ctx = create_context()
-    assert calls == [(tmp_path, "expected-daemon")]
+    assert calls == [(tmp_path, "expected-namespace")]
     assert ctx.free_space() > 0
     assert ctx.poll_interval == expected
+
+
+@pytest.mark.parametrize("runner", ["compose", "docker", "Kubernetes"])
+def test_unknown_runner_lists_valid_runners(tmp_path, monkeypatch, capsys, runner):
+    monkeypatch.setenv("PHUB_RUNNER", runner)
+    monkeypatch.setenv("PHUB_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("PHUB_CATALOG", "deploy/catalog.yaml")
+    assert main(["list"]) == 2
+    err = capsys.readouterr().err
+    assert runner in err
+    assert "fake, kubernetes" in err
+
+
+def test_free_bytes_reports_available_space(tmp_path):
+    from preview_hub.runners.disk import free_bytes
+
+    assert free_bytes(tmp_path) > 0
+
+
+def test_lifecycle_does_not_import_runners():
+    tree = ast.parse(Path("preview_hub/lifecycle.py").read_text())
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            assert "runners" not in (node.module or "")
+        elif isinstance(node, ast.Import):
+            assert all("runners" not in item.name for item in node.names)
 
 
 def test_inventory_cli(ctx, capsys):
@@ -53,25 +83,21 @@ def test_serve_runs_gc_before_wait(ctx, monkeypatch):
     assert calls == ["gc", 15]
 
 
-def test_cli_up_renders_real_plan(ctx, monkeypatch, capsys):
-    import yaml
-
+def test_cli_up_plans_typed_environment_name(ctx, monkeypatch, capsys):
     from preview_hub.contracts import EnvName
-    from preview_hub.runners.compose import render
 
     apply = ctx.runner.apply
-    rendered = []
+    seen = []
 
-    def render_and_apply(plan):
+    def check_and_apply(plan):
         assert type(plan.env) is EnvName
-        document = render(plan)
-        rendered.append(yaml.safe_load(yaml.safe_dump(document)))
+        seen.append(plan.env)
         return apply(plan)
 
-    monkeypatch.setattr(ctx.runner, "apply", render_and_apply)
+    monkeypatch.setattr(ctx.runner, "apply", check_and_apply)
     assert main(["up", "smoke2", "--format", "json"], ctx) == 0
     assert json.loads(capsys.readouterr().out)["state"] == "READY"
-    assert rendered[0]["services"]["backend"]["labels"]["dev.phub.env"] == "smoke2"
+    assert seen == ["smoke2"]
 
 
 @pytest.mark.parametrize(
@@ -106,12 +132,12 @@ def test_serve_gc_interval_resolution(ctx, monkeypatch, args, env, expected):
 
 
 @pytest.mark.parametrize("interval", ["2s", "0", "-1", "nan", "inf"])
-def test_invalid_health_interval_is_compose_input_error(
+def test_invalid_health_interval_is_kubernetes_input_error(
     tmp_path, monkeypatch, capsys, interval
 ):
-    monkeypatch.setenv("PHUB_RUNNER", "compose")
+    monkeypatch.setenv("PHUB_RUNNER", "kubernetes")
     monkeypatch.setenv("PHUB_STATE_DIR", str(tmp_path))
-    monkeypatch.setenv("PHUB_CATALOG", "deploy/hub-stack/catalog.yaml")
+    monkeypatch.setenv("PHUB_CATALOG", "deploy/catalog.yaml")
     monkeypatch.setenv("PHUB_HEALTH_POLL_INTERVAL", interval)
     assert main(["list"]) == 2
     assert capsys.readouterr().err
@@ -120,7 +146,7 @@ def test_invalid_health_interval_is_compose_input_error(
 def test_invalid_health_interval_does_not_affect_fake_context(tmp_path, monkeypatch):
     monkeypatch.setenv("PHUB_RUNNER", "fake")
     monkeypatch.setenv("PHUB_STATE_DIR", str(tmp_path))
-    monkeypatch.setenv("PHUB_CATALOG", "deploy/hub-stack/catalog.yaml")
+    monkeypatch.setenv("PHUB_CATALOG", "deploy/catalog.yaml")
     monkeypatch.setenv("PHUB_HEALTH_POLL_INTERVAL", "2s")
     assert create_context().poll_interval == 0.1
 

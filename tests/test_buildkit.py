@@ -156,7 +156,7 @@ def test_cli_wires_kubernetes_runner(tmp_path, monkeypatch):
     monkeypatch.delenv("PHUB_HEALTH_POLL_INTERVAL", raising=False)
     monkeypatch.setenv("PHUB_RUNNER", "kubernetes")
     monkeypatch.setenv("PHUB_STATE_DIR", str(tmp_path))
-    monkeypatch.setenv("PHUB_CATALOG", "deploy/hub-stack/catalog.yaml")
+    monkeypatch.setenv("PHUB_CATALOG", "deploy/catalog.yaml")
     monkeypatch.setenv("PHUB_REGISTRY", "registry.preview-hub:5000")
     ctx = create_context()
     assert seen == {

@@ -72,8 +72,8 @@ def descriptor(
         "createdAt": env["created_at"],
         "expiresAt": env["ttl_expires_at"],
         "entryUrl": urls.get(entry_service, next(iter(urls.values()), None)),
-        # Where the router is reachable: Compose publishes phub-proxy on a host port;
-        # on Kubernetes it is the cluster's Traefik Service (PHUB_PROXY_ADDRESS/_PORT).
+        # Where the router is reachable: the cluster's Traefik Service
+        # (PHUB_PROXY_ADDRESS / PHUB_PROXY_PORT); unset falls back to phub-proxy:80.
         "proxy": {
             "hostPort": proxy_port
             if proxy_port is not None
@@ -142,22 +142,9 @@ def create_context() -> Context:
     runner: Runner
     free_space = None
     poll_interval = 0.1
-    if runner_name == "compose":
-        from .runners.compose import ComposeRunner, vm_free_bytes
-
-        poll_interval = float(os.environ.get("PHUB_HEALTH_POLL_INTERVAL", "2"))
-        if not math.isfinite(poll_interval) or poll_interval <= 0:
-            raise InvalidInput("Health poll interval must be finite and positive")
-        runner = ComposeRunner(
-            state_dir,
-            config_override(
-                config, "PHUB_DAEMON_NAME", "daemon_name", "colima-preview-hub"
-            ),
-        )
-        free_space = lambda: vm_free_bytes(state_dir)
-    elif runner_name == "kubernetes":
+    if runner_name == "kubernetes":
         from .runners.buildkit import BuildKitBuilder
-        from .runners.compose import vm_free_bytes
+        from .runners.disk import free_bytes
         from .runners.kubernetes import KubernetesRunner
 
         poll_interval = float(os.environ.get("PHUB_HEALTH_POLL_INTERVAL", "2"))
@@ -188,13 +175,15 @@ def create_context() -> Context:
             ),
         )
         # Builds and images live in the cluster; the hub's own disk holds state and checkouts.
-        free_space = lambda: vm_free_bytes(state_dir)
+        free_space = lambda: free_bytes(state_dir)
     elif runner_name == "fake":
         from .runners.fake import FakeRunner
 
         runner = FakeRunner()
     else:
-        raise InvalidInput(f"Runner unavailable: {runner_name}")
+        raise InvalidInput(
+            f"Unknown runner {runner_name!r}: valid runners are fake, kubernetes"
+        )
 
     github = UrllibGitHubApi(
         Path(os.environ.get("PHUB_GITHUB_TOKEN_FILE", "/run/secrets/github_token"))

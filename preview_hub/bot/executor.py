@@ -25,9 +25,10 @@ class Result:
     data: dict[str, Any]
 
 
-# How the bot reaches the hub CLI. The Compose stack runs the bot as a sibling container;
-# on Kubernetes the bot is a sidecar in the hub pod and runs `phub` itself on the shared state.
-DEFAULT_HUB_EXEC = "docker exec phub-hub"
+# Command prefix the bot puts before `phub` to reach the hub CLI. The default is empty:
+# the bot is a sidecar in the hub pod and runs `phub` itself on the shared state.
+# `PHUB_HUB_EXEC` can name a wrapper (for example `kubectl exec ... --`) instead.
+DEFAULT_HUB_EXEC = ""
 
 
 class Executor:

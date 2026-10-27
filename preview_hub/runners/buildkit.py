@@ -71,7 +71,7 @@ class BuildKitBuilder:
     ) -> str:
         repo, tag = f"phub/{service}", commit[:12]
         pulled = f"{self.pull_registry}/{repo}:{tag}"
-        # Commit-addressed tags are immutable: an existing one is reused, as in Compose.
+        # Commit-addressed tags are immutable: an existing one is reused.
         if self._api("HEAD", f"{repo}/manifests/{tag}")[0] == 200:
             return pulled
         dockerfile = source / manifest.build["dockerfile"]

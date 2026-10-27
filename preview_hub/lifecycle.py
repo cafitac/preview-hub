@@ -55,7 +55,7 @@ class Context:
             else shutil.disk_usage(self.registry.state_dir).free
         )
         if free < self.min_free_bytes:
-            raise CapacityError("VM free disk space below 5 GiB")
+            raise CapacityError("Free disk space below 5 GiB")
 
 
 @contextmanager

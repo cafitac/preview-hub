@@ -182,7 +182,7 @@ def test_descriptor_proxy_follows_runtime():
         "services": [],
     }
     template = "http://{subdomain}.{env}.localhost:18080"
-    # Compose: the published phub-proxy port from the template
+    # Default: phub-proxy:80, with the host port taken from the template
     assert descriptor(env, template)["proxy"] == {
         "hostPort": 18080,
         "inNetworkAddress": "phub-proxy:80",

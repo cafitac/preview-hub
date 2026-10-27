@@ -117,7 +117,7 @@ class Runner:
             self.code,
             json.dumps(
                 {
-                    "state": "DELETED" if args[4] == "down" else "READY",
+                    "state": "DELETED" if args[1] == "down" else "READY",
                     "services": [
                         {
                             "service": "backend",
@@ -236,9 +236,6 @@ def test_exactly_once_and_pinning_across_restart(rig, catalog):
     assert len(runner.calls) == len(api.posts) == 1
     args = runner.calls[0]
     assert args == [
-        "docker",
-        "exec",
-        "phub-hub",
         "phub",
         "up",
         "pr-backend-42",
@@ -348,9 +345,6 @@ def test_closed_pr_sweep_retries_failure_after_advancing(rig):
     assert ledger.cursor(REPO)[1] == bot.clock().isoformat()
     assert bot.closed_retries[REPO] == {"pr-backend-42"}
     assert runner.calls[0] == [
-        "docker",
-        "exec",
-        "phub-hub",
         "phub",
         "down",
         "pr-backend-42",
@@ -405,7 +399,7 @@ def test_reply_limit_resets_on_restart(rig, catalog):
     for _ in range(6):
         restarted.poll()
     assert len(api.posts) == 6
-    assert [args[4] for args in runner.calls] == ["up"] + ["status"] * 3
+    assert [args[1] for args in runner.calls] == ["up"] + ["status"] * 3
     assert ledger.rows(("DONE",))[0]["reply_comment_id"] is None
     with ledger.registry.connect() as db:
         assert [row[0] for row in db.execute("SELECT key FROM schema_meta")] == [
@@ -601,7 +595,7 @@ def test_reply_rebuilds_from_row_and_fresh_status(rig, catalog, status, error):
         clock=lambda: NOW,
     )
     restarted.replies()
-    assert runner.calls[0][4:] == ["status", "pr-backend-42", "--format", "json"]
+    assert runner.calls[0][1:] == ["status", "pr-backend-42", "--format", "json"]
     body = api.posts[0][2]
     assert "stale body" not in body
     assert (error or "http://api.localhost") in body
@@ -746,16 +740,6 @@ def test_reply_body_and_budget_are_lost_on_restart(rig):
     restarted = Ledger(Registry(ledger.registry.state_dir))
     assert not restarted.initial_replies
     assert restarted.claim_reply(100, NOW.timestamp())
-
-
-def test_hub_and_bot_share_configurable_uid_and_state_volume():
-    from preview_hub.contracts import load_yaml
-
-    services = load_yaml(Path("deploy/hub-stack/compose.yaml"))["services"]
-    for name in ("hub", "bot"):
-        assert services[name]["user"] == "${PHUB_UID_GID:-0:0}"
-        assert "phub-state:/state" in services[name]["volumes"]
-        assert "/var/run/docker.sock:/var/run/docker.sock" in services[name]["volumes"]
 
 
 def test_overlap_still_accepts_delayed_comments_after_initial_floor(rig):
@@ -1145,9 +1129,6 @@ def test_executor_preserves_other_service_pr_ref(action, catalog):
     assert Executor(runner).execute(command, "pr-backend-42", "backend", SHA).code == 0
     assert calls == [
         [
-            "docker",
-            "exec",
-            "phub-hub",
             "phub",
             action,
             "pr-backend-42",
@@ -1192,7 +1173,7 @@ def test_executor_hub_exec_prefix():
         command, "demo"
     )
     assert [a[: a.index("phub")] for a in seen] == [
-        ["docker", "exec", "phub-hub"],
+        [],
         [],
         ["kubectl", "exec", "-n", "preview-hub", "deploy/hub", "--"],
     ]
