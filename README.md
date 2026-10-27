@@ -1,7 +1,35 @@
 # preview-hub
 
 Branch-pinned multi-repository preview environments. The hub provides contracts,
-planning, a SQLite registry, lifecycle orchestration, and fake/Compose runners.
+planning, a SQLite registry, lifecycle orchestration, and fake, Compose and
+Kubernetes runners.
+
+## Production runtime (Kubernetes, since 2026-10-05)
+
+Production runs on the homelab k3s cluster (`cafitac/homelab` `apps/preview-hub`,
+deployed by Argo CD). One preview environment is one namespace `phub-<env>`.
+
+```text
+GitHub PR ── bot (hub pod sidecar) ── hub (ServiceAccount + RBAC)
+                                       │ kubectl apply --server-side --field-manager phub
+                                       ├─ kubernetes runner: environment = namespace phub-<env>
+                                       └─ build: BuildKit Job → in-cluster registry
+cluster Traefik (Ingress + Middleware) ◀── Cloudflare Tunnel (*.cafitac.com)
+```
+
+- `runner: kubernetes` (or `PHUB_RUNNER=kubernetes`) selects it. The runner port is
+  unchanged: plans, registry and the environment description do not know about Docker
+  or Kubernetes, so ai-qa needed no change.
+- Isolation: a ResourceQuota and a NetworkPolicy (same namespace and Traefik only)
+  per namespace. `destroy` deletes only namespaces carrying the owner label.
+- Public routes use the same ForwardAuth (hub `/auth/verify`) and StripPrefix
+  middlewares and the same priorities as the Compose stack.
+- The switch was accepted with an ai-qa end-to-end run (up → scenarios → down, nothing
+  left behind). The first run failed: Service selectors also matched the same service's
+  postgres and init pods. The fix (#20) added a role label and a "one selector = one
+  workload" test.
+
+The Compose runtime below is kept for local use and as the previous design record.
 
 ## Development
 
@@ -92,7 +120,11 @@ before descriptors can advertise working per-environment accounts.
 The test fixtures are copies of the U1 backend and U2 frontend `preview.yaml`
 files. Tests use synthetic local Git repositories and never contact a remote.
 
-## Container runtime (U4)
+## Compose runtime (U4, production until 2026-10-05)
+
+Production moved to Kubernetes (see above) and the Colima `preview-hub` VM was
+deleted. This section describes the Compose runner, which still works.
+
 
 The dedicated Colima profile `preview-hub` contains the hub, Traefik and every
 preview container. The host runs the VM only; no Python service or GC daemon is
