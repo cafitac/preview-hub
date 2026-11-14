@@ -58,6 +58,11 @@ RESOURCE_MEMORY = "512Mi"
 PROBE_PERIOD = 2
 INIT_JOB_TIMEOUT_SECONDS = 600
 INIT_JOB_POLL_SECONDS = 2
+# A new pod is refused by the namespace NetworkPolicy for about a second until
+# kube-router adds its address (measured 2026-11-14: first connect REFUSED, then
+# open). Init commands connect immediately, so allow Kubernetes to retry the pod
+# (10s, then 20s backoff) instead of failing the whole environment.
+INIT_JOB_BACKOFF_LIMIT = 2
 
 
 def namespace(env: str) -> str:
@@ -208,7 +213,7 @@ def _init_jobs(ns: str, plan: EnvironmentPlan) -> dict[str, list[dict[str, Any]]
                             "labels": labels,
                         },
                         "spec": {
-                            "backoffLimit": 0,
+                            "backoffLimit": INIT_JOB_BACKOFF_LIMIT,
                             "template": {
                                 "metadata": {"labels": labels},
                                 "spec": {

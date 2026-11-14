@@ -184,7 +184,7 @@ backend:
       dev.phub.service: backend
       dev.phub.role: init
   spec:
-    backoffLimit: 0
+    backoffLimit: 2
     template:
       metadata:
         labels:
@@ -227,7 +227,7 @@ backend:
       dev.phub.service: backend
       dev.phub.role: init
   spec:
-    backoffLimit: 0
+    backoffLimit: 2
     template:
       metadata:
         labels:
