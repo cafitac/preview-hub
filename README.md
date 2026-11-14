@@ -164,6 +164,11 @@ files. Tests use synthetic local Git repositories and never contact a remote.
 
 `phub serve --interval 900` runs GC immediately and every 15 minutes, including
 stale-operation recovery; `PHUB_GC_INTERVAL` changes the default interval.
+Every operation holds its environment's lock file (flock) from start to finish, so a
+RUNNING operation found by whoever next takes that lock has no live owner and is marked
+INTERRUPTED at once (its environment becomes FAILED). After a hub restart the startup
+GC therefore reclaims interrupted environments immediately, without a PID or heartbeat
+timeout.
 `phub inventory [environment] --format json` exposes label-scoped runtime objects.
 Shared cached service images have service labels, not environment labels.
 `phub logs` includes application stdout and stderr. The health failure message is

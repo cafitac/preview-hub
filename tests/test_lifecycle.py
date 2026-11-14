@@ -1,3 +1,4 @@
+import fcntl
 import json
 import os
 from dataclasses import replace
@@ -89,6 +90,9 @@ def test_delete_failure_retry_isolation_and_expiry(ctx):
     [
         (99999999, "2999-01-01T00:00:00+00:00"),
         (os.getpid(), "2000-01-01T00:00:00+00:00"),
+        # A restarted container reuses PIDs: a live PID with a fresh heartbeat is still dead
+        # once the environment lock is free.
+        (os.getpid(), "2999-01-01T00:00:00+00:00"),
     ],
 )
 def test_stale_recovery(ctx, pid, heartbeat):
@@ -104,6 +108,22 @@ def test_stale_recovery(ctx, pid, heartbeat):
         assert (
             db.execute("SELECT status FROM operations").fetchone()[0] == "INTERRUPTED"
         )
+
+
+def test_gc_reclaims_every_interrupted_environment_in_one_pass(ctx):
+    CreateEnvironment(ctx).execute(spec())
+    CreateEnvironment(ctx).execute(spec("feat-y"))
+    with ctx.registry.transaction() as db:
+        db.execute(
+            "UPDATE operations SET status='RUNNING',pid=?,heartbeat_at=?",
+            (os.getpid(), "2999-01-01T00:00:00+00:00"),
+        )
+        db.execute("UPDATE environments SET state='STARTING'")
+    ExpireEnvironments(ctx).execute()
+    assert {e["name"]: e["state"] for e in ctx.registry.list()} == {
+        "feat-x": "FAILED",
+        "feat-y": "FAILED",
+    }
 
 
 def test_busy_capacity_disk_and_cli_exit_codes(ctx, capsys):
@@ -154,8 +174,13 @@ def test_live_operation_is_not_stolen(ctx):
     CreateEnvironment(ctx).execute(spec())
     with ctx.registry.transaction() as db:
         db.execute("UPDATE operations SET status='RUNNING'")
-    with pytest.raises(BusyError):
-        DescribeEnvironment(ctx).execute("feat-x")
+    # Another process running the operation holds the environment flock.
+    with (ctx.registry.state_dir / "locks" / "feat-x.lock").open("a") as held:
+        fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with pytest.raises(BusyError):
+            DescribeEnvironment(ctx).execute("feat-x")
+    with ctx.registry.connect() as db:
+        assert db.execute("SELECT status FROM operations").fetchone()[0] == "RUNNING"
 
 
 def test_failed_build_retry_rebuilds_same_pin(ctx):
