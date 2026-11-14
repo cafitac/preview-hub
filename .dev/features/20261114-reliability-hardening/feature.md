@@ -49,10 +49,10 @@
 | PH-8 | 남는 파일 정리(gc) | 배포 | PR (#28 위에 쌓음) |
 | PH-9 | 환경 namespace 방어(PSA, SA 토큰, egress) | 배포 | PR (#29 위에 쌓음) |
 | PH-4 / HL-2 | GitHub 토큰 마운트, secrets.sh | 클러스터 | homelab#201(머지=배포, 승인 필요) · homelab#202 |
-| HL-1 | 레지스트리 NetworkPolicy 좁히기 | 클러스터 + 실측 | 대기 |
+| HL-1 | 레지스트리 NetworkPolicy 좁히기 | 클러스터 + 실측 | 실측 대기(소유자 kubectl) |
 | HL-3 | `/metrics` · 경보 | 배포 + 클러스터 | hub 지표 PR (#30 위) + homelab#204(hub 배포와 함께 머지) |
 | HL-4 | hub 쓰기 범위 VAP | 클러스터 | homelab#203(머지=적용, 승인 필요) |
-| PH-11 · HL-5 · HL-6 | 문구 · 레지스트리 GC · buildkit 캐시 상한 | 배포 / 클러스터 | 대기 |
+| PH-11 · HL-5 · HL-6 | 문구 · 레지스트리 GC · buildkit 캐시 상한 | 배포 / 클러스터 | PH-11 PR (#31 위) · HL-5 결정 대기 · homelab#205 |
 
 ## 진행 기록
 - 2026-11-14: AQP-1 sprint 세션(「agent-skills 작업」)이 P8 실환경 검증에 hub API 로 환경을 만든다. hub 배포나 클러스터 변경 전에는 그 세션에 먼저 알린다(코드 PR 은 조율 불필요)
@@ -70,3 +70,7 @@
 - 2026-11-14 PH-8: gc 가 안 쓰는 체크아웃(7일), 웹 로그(14일), 삭제된 환경의 매니페스트 · 잠금 파일을 지운다. Registry.lock 은 flock 뒤 inode 를 확인한다. 체크아웃 재사용 시 mtime 갱신(진행 중 생성과의 경쟁 방지). 675 passed. 실제 디스크 사용량 실측은 소유자 kubectl 필요
 - 2026-11-14 PH-9: namespace PSA baseline(warn restricted), 모든 파드 automountServiceAccountToken=false, egress 는 DNS · 같은 namespace · 공인 주소만. 676 passed. 배포 뒤 e2e 로 서비스 간 통신 · DNS 확인 필요(k3s kube-router 의 egress 적용)
 - 2026-11-14 HL-3: hub 는 별도 포트(PHUB_METRICS_PORT, 9100)에 Access 없이 /metrics. homelab#204 는 PodMonitor + PreviewHubDown/GcStale/OpStuck. Cloudflare bypass 와 phub-* namespace 경보는 쓰지 않음(이유는 PR 본문). 680 passed
+- 2026-11-14 PH-11: 오류 문구를 대시보드 · /preview · phub 공통으로, README 의 BuildKit Job → buildkitd. 681 passed
+- 2026-11-14 HL-6: homelab#205 — buildkitd.toml(reservedSpace 2GB, maxUsedSpace 20GB, minFreeSpace 20GB). 머지 전 캐시 사용량 실측 권장
+- 2026-11-14 HL-1: 레지스트리가 보는 노드 pull 의 출발 주소(hostPort 127.0.0.1 DNAT 뒤 SNAT 여부) 실측 전에는 from 을 정할 수 없다. 측정 요청을 소유자에게 넘김. PH-9 의 egress 가 환경 파드 → 레지스트리 경로는 먼저 막는다
+- 2026-11-14 HL-5: 레지스트리 GC 를 읽기 전용 모드로 돌리는 방식(CronJob 이 registry 를 readonly 로 재시작 → gc → 복구) vs hub 가 빌드 슬롯을 잡고 GC 를 트리거하는 방식 — 소유자 결정 대기

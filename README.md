@@ -13,7 +13,7 @@ deployed by Argo CD). One preview environment is one namespace `phub-<env>`.
 GitHub PR ── bot (hub pod sidecar) ── hub (ServiceAccount + RBAC)
                                        │ kubectl apply --server-side --field-manager phub
                                        ├─ kubernetes runner: environment = namespace phub-<env>
-                                       └─ build: BuildKit Job → in-cluster registry
+                                       └─ build: buildkitd (buildctl) → in-cluster registry
 cluster Traefik (Ingress + Middleware) ◀── Cloudflare Tunnel (*.cafitac.com)
 ```
 
