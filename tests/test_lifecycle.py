@@ -36,8 +36,12 @@ def test_create_pin_immutability_update_and_delete(ctx):
         DescribeEnvironment(ctx).execute("feat-x")["services"][0]["commit_sha"]
         == "a" * 40
     )
-    with pytest.raises(InvalidInput):
+    with pytest.raises(InvalidInput) as error:
         CreateEnvironment(ctx).execute(spec(backend="other"))
+    assert str(error.value) == (
+        "Environment exists with different refs; update it instead "
+        "(dashboard update, `/preview update`, or `phub update`)"
+    )
     updated = UpdateEnvironment(ctx).execute("feat-x", {"backend": "other"})
     assert updated["services"][0]["commit_sha"] == "b" * 40
     assert updated["state"] == "READY"
@@ -46,6 +50,22 @@ def test_create_pin_immutability_update_and_delete(ctx):
     assert DeleteEnvironment(ctx).execute("feat-x") == result
     assert DeleteEnvironment(ctx).execute("unknown") is None
     assert CreateEnvironment(ctx).execute(spec())["id"] != first["id"]
+
+
+def test_create_existing_non_ready_environment_message(ctx):
+    CreateEnvironment(ctx).execute(spec())
+    with ctx.registry.transaction() as db:
+        db.execute("UPDATE environments SET state='FAILED' WHERE name='feat-x'")
+    before = ctx.registry.get("feat-x")
+
+    with pytest.raises(InvalidInput) as error:
+        CreateEnvironment(ctx).execute(spec())
+
+    assert str(error.value) == (
+        "Environment is not READY; update or delete it first "
+        "(dashboard, `/preview update|down`, or `phub update|down`)"
+    )
+    assert ctx.registry.get("feat-x") == before
 
 
 @pytest.mark.parametrize("stage", ["resolve", "build", "start", "health"])

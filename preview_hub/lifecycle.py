@@ -435,11 +435,15 @@ class CreateEnvironment:
                             pending.append(target)
                 if requested != previous.services:
                     raise InvalidInput(
-                        "Environment exists with different refs; use phub update"
+                        "Environment exists with different refs; update it instead "
+                        "(dashboard update, `/preview update`, or `phub update`)"
                     )
                 if old["state"] == "READY":
                     return old
-                raise InvalidInput("Environment is not READY; use phub update or down")
+                raise InvalidInput(
+                    "Environment is not READY; update or delete it first "
+                    "(dashboard, `/preview update|down`, or `phub update|down`)"
+                )
             ctx.disk_guard()
             pr_pins = _resolve_pr_refs(ctx, spec.services)
             with ctx.registry.transaction() as db:
