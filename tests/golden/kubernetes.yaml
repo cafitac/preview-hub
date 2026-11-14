@@ -7,6 +7,9 @@ shared:
       dev.phub.managed: 'true'
       dev.phub.env: test-one
       dev.phub.service: shared
+      pod-security.kubernetes.io/enforce: baseline
+      pod-security.kubernetes.io/enforce-version: latest
+      pod-security.kubernetes.io/warn: restricted
 - apiVersion: v1
   kind: ResourceQuota
   metadata:
@@ -34,6 +37,38 @@ shared:
     podSelector: {}
     policyTypes:
     - Ingress
+    - Egress
+    egress:
+    - to:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: kube-system
+        podSelector:
+          matchLabels:
+            k8s-app: kube-dns
+      ports:
+      - protocol: UDP
+        port: 53
+      - protocol: TCP
+        port: 53
+    - to:
+      - podSelector: {}
+    - to:
+      - ipBlock:
+          cidr: 0.0.0.0/0
+          except:
+          - 10.0.0.0/8
+          - 172.16.0.0/12
+          - 192.168.0.0/16
+          - 100.64.0.0/10
+          - 169.254.0.0/16
+          - 127.0.0.0/8
+      - ipBlock:
+          cidr: ::/0
+          except:
+          - fc00::/7
+          - fe80::/10
+          - ::1/128
     ingress:
     - from:
       - podSelector: {}
@@ -71,6 +106,7 @@ backend:
           dev.phub.role: resource
           dev.phub.resource: backend--db
       spec:
+        automountServiceAccountToken: false
         enableServiceLinks: false
         containers:
         - name: postgres
@@ -158,6 +194,7 @@ backend:
           dev.phub.role: init
       spec:
         restartPolicy: Never
+        automountServiceAccountToken: false
         enableServiceLinks: false
         containers:
         - name: init
@@ -200,6 +237,7 @@ backend:
           dev.phub.role: init
       spec:
         restartPolicy: Never
+        automountServiceAccountToken: false
         enableServiceLinks: false
         containers:
         - name: init
@@ -253,6 +291,7 @@ backend:
         annotations:
           dev.phub.revision: 56752964ac694cd1
       spec:
+        automountServiceAccountToken: false
         enableServiceLinks: false
         containers:
         - name: backend
@@ -389,6 +428,7 @@ frontend:
         annotations:
           dev.phub.revision: 2749856caec573ab
       spec:
+        automountServiceAccountToken: false
         enableServiceLinks: false
         containers:
         - name: frontend

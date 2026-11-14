@@ -133,9 +133,63 @@ def test_render_shape(tmp_path):
         if template:
             # Service links once injected SERVER_PORT=tcp://… and broke a Spring app.
             assert template["enableServiceLinks"] is False
+            assert template["automountServiceAccountToken"] is False
     # The resource URL baked into env by the plan resolves to the rendered Service.
     url = plan.services[0].env["DATABASE_URL"]
     assert "@backend--db:5432/" in url
+
+
+def test_namespace_security_and_network_policy(tmp_path):
+    shared = render(make_plan(tmp_path), AUTH)["shared"]
+    labels = shared[0]["metadata"]["labels"]
+    assert {
+        key: value for key, value in labels.items() if key.startswith("pod-security.")
+    } == {
+        "pod-security.kubernetes.io/enforce": "baseline",
+        "pod-security.kubernetes.io/enforce-version": "latest",
+        "pod-security.kubernetes.io/warn": "restricted",
+    }
+    policy = shared[2]["spec"]
+    assert policy["policyTypes"] == ["Ingress", "Egress"]
+    assert policy["ingress"] == [
+        {"from": [{"podSelector": {}}]},
+        {
+            "from": [
+                {
+                    "namespaceSelector": {
+                        "matchLabels": {"kubernetes.io/metadata.name": "kube-system"}
+                    },
+                    "podSelector": {
+                        "matchLabels": {"app.kubernetes.io/name": "traefik"}
+                    },
+                }
+            ]
+        },
+    ]
+    dns, same_namespace, public = policy["egress"]
+    assert dns == {
+        "to": [
+            {
+                "namespaceSelector": {
+                    "matchLabels": {"kubernetes.io/metadata.name": "kube-system"}
+                },
+                "podSelector": {"matchLabels": {"k8s-app": "kube-dns"}},
+            }
+        ],
+        "ports": [{"protocol": "UDP", "port": 53}, {"protocol": "TCP", "port": 53}],
+    }
+    assert same_namespace == {"to": [{"podSelector": {}}]}
+    ipv4, ipv6 = [peer["ipBlock"] for peer in public["to"]]
+    assert ipv4["cidr"] == "0.0.0.0/0"
+    assert set(ipv4["except"]) == {
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "100.64.0.0/10",
+        "169.254.0.0/16",
+        "127.0.0.0/8",
+    }
+    assert ipv6 == {"cidr": "::/0", "except": ["fc00::/7", "fe80::/10", "::1/128"]}
 
 
 def test_each_selector_picks_exactly_one_workload(tmp_path):
