@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import subprocess
 import time
 from collections.abc import Callable
@@ -19,7 +20,7 @@ from urllib.parse import urlsplit
 
 import yaml
 
-from ..contracts import EnvName, ServiceManifest, duration
+from ..contracts import EnvName, InvalidInput, ServiceManifest, duration
 from ..runner import EnvironmentPlan, Health, Inventory, ResourcePlan, RunResult
 
 Builder = Callable[[str, str, Path, ServiceManifest], str]
@@ -56,6 +57,7 @@ FATAL_WAITING = {
 }
 RESOURCE_MEMORY = "512Mi"
 PROBE_PERIOD = 2
+REGISTRY_GC_TIMEOUT_SECONDS = 1800
 INIT_JOB_TIMEOUT_SECONDS = 600
 INIT_JOB_POLL_SECONDS = 2
 # A new pod is refused by the namespace NetworkPolicy for about a second until
@@ -585,8 +587,10 @@ class KubernetesRunner:
         executor: Executor = execute,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
+        wall: Callable[[], float] = time.time,
     ):
         self.state_dir, self.builder, self.auth_url = state_dir, builder, auth_url
+        self.hub_namespace, self.wall = hub_namespace, wall
         self.executor = executor
         self.sleep, self.clock = sleep, clock
         # Refuse to act on the wrong cluster.
@@ -613,8 +617,14 @@ class KubernetesRunner:
         output = self._kubectl(*args, "-o", "json")
         return cast(dict[str, Any], json.loads(output)) if output.strip() else {}
 
-    def _wait_job(self, ns: str, name: str) -> None:
-        deadline = self.clock() + INIT_JOB_TIMEOUT_SECONDS
+    def _wait_job(
+        self,
+        ns: str,
+        name: str,
+        timeout: int = INIT_JOB_TIMEOUT_SECONDS,
+        label: str = "init job",
+    ) -> None:
+        deadline = self.clock() + timeout
         while self.clock() < deadline:
             job = self._json("get", "job", "-n", ns, name)
             for condition in job.get("status", {}).get("conditions", []):
@@ -632,16 +642,62 @@ class KubernetesRunner:
                         pass
                     # RunResult keeps the last 2000 chars; leave room for the header.
                     raise OSError(
-                        f"init job {name} failed: {condition.get('reason', '')}: "
+                        f"{label} {name} failed: {condition.get('reason', '')}: "
                         f"{condition.get('message', '')}\n{logs[-1500:]}"
                     )
             remaining = deadline - self.clock()
             if remaining <= 0:
                 break
             self.sleep(min(INIT_JOB_POLL_SECONDS, remaining))
-        raise OSError(
-            f"init job {name} did not complete within {INIT_JOB_TIMEOUT_SECONDS}s"
-        )
+        raise OSError(f"{label} {name} did not complete within {timeout}s")
+
+    def gc_registry_storage(self) -> bool:
+        try:
+            interval = float(os.environ.get("PHUB_REGISTRY_GC_INTERVAL", "604800"))
+            if not math.isfinite(interval) or interval < 0:
+                raise ValueError
+        except ValueError as exc:
+            raise InvalidInput(
+                "PHUB_REGISTRY_GC_INTERVAL must be finite and nonnegative"
+            ) from exc
+        if interval == 0:
+            return False
+        stamp = self.state_dir / "registry-gc.last"
+        now = self.wall()
+        try:
+            last: float | None = float(stamp.read_text())
+        except (OSError, ValueError):
+            last = None  # Missing or unreadable: treat as never collected.
+        if last is not None and now - last <= interval:
+            return False
+        name = f"registry-gc-{int(now)}"
+        try:
+            self._kubectl(
+                "-n",
+                self.hub_namespace,
+                "create",
+                "job",
+                name,
+                "--from=cronjob/registry-gc",
+            )
+            self._wait_job(
+                self.hub_namespace, name, REGISTRY_GC_TIMEOUT_SECONDS, "registry GC job"
+            )
+        finally:
+            self._kubectl(
+                "-n",
+                self.hub_namespace,
+                "delete",
+                "job",
+                name,
+                "--ignore-not-found",
+                "--wait=false",
+            )
+        self.state_dir.mkdir(parents=True, exist_ok=True)
+        temporary = stamp.with_suffix(".tmp")
+        temporary.write_text(str(self.wall()))
+        temporary.replace(stamp)
+        return True
 
     def _apply(self, objects: list[dict[str, Any]]) -> None:
         if objects:

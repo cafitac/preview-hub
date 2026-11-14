@@ -37,7 +37,7 @@ from .lifecycle import (
 )
 from .registry import BusyError, Registry
 from .registry import now as registry_now
-from .runner import Health, ImageCollector, Runner
+from .runner import Health, ImageCollector, RegistryStorageCollector, Runner
 
 
 class LogReader(Protocol):
@@ -324,28 +324,42 @@ def main(argv: list[str] | None = None, context: Context | None = None) -> int:
             result = ctx.registry.list()
         elif args.command == "gc":
             result = ExpireEnvironments(ctx).execute()
-            if hasattr(ctx.runner, "gc_images"):
-                # Exclude builds while taking the active-image snapshot and collecting.
-                with ExitStack() as stack:
-                    folder = ctx.registry.state_dir / "locks"
-                    folder.mkdir(exist_ok=True)
-                    for index in range(ctx.catalog.build_concurrency):
-                        handle = stack.enter_context(
-                            (folder / f"build-{index}.lock").open("a")
-                        )
-                        fcntl.flock(handle, fcntl.LOCK_EX)
-                    db = ctx.registry.connect()
-                    try:
-                        retained = {
-                            str(row[0])
-                            for row in db.execute(
-                                "SELECT s.image FROM environment_services s JOIN environments e ON e.id=s.environment_id WHERE e.state!='DELETED'"
+            try:
+                if hasattr(ctx.runner, "gc_images") or hasattr(
+                    ctx.runner, "gc_registry_storage"
+                ):
+                    # Exclude builds while taking the active-image snapshot and collecting.
+                    with ExitStack() as stack:
+                        folder = ctx.registry.state_dir / "locks"
+                        folder.mkdir(exist_ok=True)
+                        for index in range(ctx.catalog.build_concurrency):
+                            handle = stack.enter_context(
+                                (folder / f"build-{index}.lock").open("a")
                             )
-                        }
-                    finally:
-                        db.close()
-                    cast(ImageCollector, ctx.runner).gc_images(retained)
-            logging.getLogger(__name__).info("GC cleanup: %s", cleanup(ctx))
+                            fcntl.flock(handle, fcntl.LOCK_EX)
+                        db = ctx.registry.connect()
+                        try:
+                            retained = {
+                                str(row[0])
+                                for row in db.execute(
+                                    "SELECT s.image FROM environment_services s JOIN environments e ON e.id=s.environment_id WHERE e.state!='DELETED'"
+                                )
+                            }
+                        finally:
+                            db.close()
+                        if hasattr(ctx.runner, "gc_images"):
+                            cast(ImageCollector, ctx.runner).gc_images(retained)
+                        if hasattr(ctx.runner, "gc_registry_storage"):
+                            collected = cast(
+                                RegistryStorageCollector, ctx.runner
+                            ).gc_registry_storage()
+                            logging.getLogger(__name__).info(
+                                "Registry storage GC: %s", collected
+                            )
+                            if isinstance(result, dict):
+                                result["registry_gc"] = collected
+            finally:
+                logging.getLogger(__name__).info("GC cleanup: %s", cleanup(ctx))
         else:
             DescribeEnvironment(ctx).execute(args.name)
             if args.tail < 0:

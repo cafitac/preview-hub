@@ -594,3 +594,99 @@ def test_health_includes_resources(tmp_path, ready, reason, expected):
     kubectl.responses[("get", "pod")] = json.dumps({"items": [resource_pod]})
     assert runner(tmp_path, kubectl).health("test-one") == {"backend": expected}
     assert any("dev.phub.role in (service,resource)" in call for call in kubectl.calls)
+
+
+@pytest.mark.parametrize("last", [None, "1.0", "999999.0", "not-a-number"])
+def test_registry_gc_due(tmp_path, monkeypatch, last):
+    monkeypatch.delenv("PHUB_REGISTRY_GC_INTERVAL", raising=False)
+    kubectl = Kubectl()
+    hub = KubernetesRunner(
+        tmp_path,
+        executor=kubectl,
+        wall=lambda: 1000000.0,
+        hub_namespace="custom-hub",
+        sleep=lambda _: None,
+    )
+    kubectl.calls.clear()
+    stamp = tmp_path / "registry-gc.last"
+    if last is not None:
+        stamp.write_text(last)
+    due = last != "999999.0"
+    name = "registry-gc-1000000"
+    kubectl.responses[("get", "job")] = [job_status(), job_status("Complete")]
+    assert hub.gc_registry_storage() is due
+    if not due:
+        assert kubectl.calls == []
+        return
+    assert (
+        kubectl.calls[0]
+        == (
+            f"kubectl -n custom-hub create job {name} --from=cronjob/registry-gc"
+        ).split()
+    )
+    assert (
+        kubectl.calls[-1]
+        == (
+            f"kubectl -n custom-hub delete job {name} --ignore-not-found --wait=false"
+        ).split()
+    )
+    assert float(stamp.read_text()) == 1000000.0
+    assert not stamp.with_suffix(".tmp").exists()
+
+
+@pytest.mark.parametrize("failure", ["failed", "timeout", "create"])
+def test_registry_gc_failure_deletes_job(tmp_path, monkeypatch, failure):
+    monkeypatch.setenv("PHUB_REGISTRY_GC_INTERVAL", "1")
+    kubectl = Kubectl()
+    tick = [0.0]
+
+    def sleep(seconds):
+        tick[0] += seconds
+
+    hub = KubernetesRunner(
+        tmp_path,
+        executor=kubectl,
+        wall=lambda: 42.0,
+        clock=lambda: tick[0],
+        sleep=sleep,
+    )
+    if failure == "create":
+        kubectl.failures[("-n", "preview-hub", "create")] = "create failed"
+    else:
+        kubectl.responses[("get", "job")] = (
+            job_status("Failed") if failure == "failed" else job_status()
+        )
+    kubectl.responses[("logs",)] = "last log line"
+    match = {
+        "failed": "registry GC job.*failed:.*BackoffLimitExceeded",
+        "timeout": "did not complete within 1800s",
+        "create": "create failed",
+    }
+    with pytest.raises(OSError, match=match[failure]) as exc:
+        hub.gc_registry_storage()
+    if failure == "failed":
+        assert "last log line" in str(exc.value)
+    assert kubectl.calls[-1][1:] == [
+        "-n",
+        "preview-hub",
+        "delete",
+        "job",
+        "registry-gc-42",
+        "--ignore-not-found",
+        "--wait=false",
+    ]
+    assert not (tmp_path / "registry-gc.last").exists()
+
+
+@pytest.mark.parametrize("interval", ["0", "invalid", "-1", "nan", "inf"])
+def test_registry_gc_interval(tmp_path, monkeypatch, interval):
+    kubectl = Kubectl()
+    hub = runner(tmp_path, kubectl)
+    kubectl.calls.clear()
+    monkeypatch.setenv("PHUB_REGISTRY_GC_INTERVAL", interval)
+    if interval == "0":
+        assert hub.gc_registry_storage() is False
+    else:
+        with pytest.raises(InvalidInput, match="PHUB_REGISTRY_GC_INTERVAL"):
+            hub.gc_registry_storage()
+    assert kubectl.calls == []
