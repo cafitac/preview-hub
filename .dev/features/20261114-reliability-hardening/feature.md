@@ -45,13 +45,13 @@
 | PH-10 | hub 재시작 뒤 중단 작업 즉시 회수 | 배포 | PR (#24 위에 쌓음) |
 | PH-6 | 생성 단계별 시간 기록 | 배포 | PR (#25 위에 쌓음) |
 | PH-7 | 한 환경 안 서비스 빌드 병렬화 | 배포 | PR (#26 위에 쌓음) |
-| PH-5 | 봇 명령을 polling 에서 떼어 냄 | 배포 | 대기 |
+| PH-5 | 봇 명령을 polling 에서 떼어 냄 | 배포 | PR (#27 위에 쌓음) |
 | PH-8 | 남는 파일 정리(gc) | 배포 | 대기 |
 | PH-9 | 환경 namespace 방어(PSA, SA 토큰, egress) | 배포 | 대기 |
 | PH-4 / HL-2 | GitHub 토큰 마운트, secrets.sh | 클러스터 | homelab#201(머지=배포, 승인 필요) · homelab#202 |
 | HL-1 | 레지스트리 NetworkPolicy 좁히기 | 클러스터 + 실측 | 대기 |
 | HL-3 | `/metrics` · 경보 | 배포 + 클러스터 + Cloudflare | 대기 |
-| HL-4 | hub 쓰기 범위 VAP | 클러스터 | 대기 |
+| HL-4 | hub 쓰기 범위 VAP | 클러스터 | homelab#203(머지=적용, 승인 필요) |
 | PH-11 · HL-5 · HL-6 | 문구 · 레지스트리 GC · buildkit 캐시 상한 | 배포 / 클러스터 | 대기 |
 
 ## 진행 기록
@@ -65,3 +65,5 @@
 - 2026-11-14 PH-7: 바뀐 서비스를 ThreadPoolExecutor(build_concurrency)로 병렬 빌드, 실패는 제출 순서상 첫 실패 서비스로 보고. 665 passed
 - 2026-11-14 PH-4: homelab#201 — Secret 디렉터리 마운트 /run/phub-secrets/github + PHUB_GITHUB_TOKEN_FILE. 머지 = Argo CD 반영(파드 재시작) → 소유자 승인 · AQP-1 세션 조율 필요. preview-hub README 의 토큰 경로 문구는 적용 뒤 고친다
 - 2026-11-14 HL-2: homelab#202 — secrets.sh 가 파일 · stdin(github), 인자(access)로 값을 받는다. 클러스터 영향 없음
+- 2026-11-14 PH-5: 봇 명령을 스레드 워커(4개)로 실행, 환경별 직렬, recover 는 진행 중 행을 건너뛰고 재시작 전 RUNNING 은 바로 중단 처리. 669 passed
+- 2026-11-14 HL-4: homelab#203 — VAP 를 platform/admission 에 둔다(apps/preview-hub 의 namespace 변환이 VAP 에 namespace 를 붙이기 때문). CEL 서버 검증은 적용 뒤 소유자 확인 필요
