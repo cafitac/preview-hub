@@ -42,7 +42,7 @@
 | PH-2 | init Job 실패를 600초 기다리지 않고 바로 끝낸다 | 배포 | #22 CI 통과, 머지 대기 |
 | PH-1 | descriptor 의 readiness 를 live 로 계산 | 배포 | PR (#22 위에 쌓음) |
 | PH-3 | inventory API + `scripts/phub-remote` | 배포 | PR (#23 위에 쌓음) |
-| PH-10 | hub 재시작 뒤 중단 작업 즉시 회수 | 배포 | 대기 |
+| PH-10 | hub 재시작 뒤 중단 작업 즉시 회수 | 배포 | PR (#24 위에 쌓음) |
 | PH-6 | 생성 단계별 시간 기록 | 배포 | 대기 |
 | PH-7 | 한 환경 안 서비스 빌드 병렬화 | 배포 | 대기 |
 | PH-5 | 봇 명령을 polling 에서 떼어 냄 | 배포 | 대기 |
@@ -60,3 +60,4 @@
 - 2026-11-14 PH-2: PR #22 게시, CI 통과(5ad9bf0). 머지는 소유자. 배포는 다음 hub 이미지 태그와 함께(소유자 승인)
 - 2026-11-14 PH-1: READY 환경의 descriptor 는 runner.health 로 다시 계산(실패하면 allHealthy=false), checkedAt=조회 시각, 대시보드 5초 캐시, health 에 resource StatefulSet 포함. 634 passed
 - 2026-11-14 PH-3: `GET /api/environments/{name}/inventory`, `scripts/phub-remote`(cloudflared access curl). 650 passed. 실제 Access 경유 호출은 배포 뒤 소유자 세션으로 확인 필요
+- 2026-11-14 PH-10: 점검 노트의 제안(작업 행에 host/instance 저장)은 쓰지 않았다. bot 은 hub 와 같은 파드의 다른 컨테이너(shareProcessNamespace 없음)라 instance 가 달라, hub GC 가 살아 있는 bot 작업을 끊는다. 대신 「작업은 처음부터 끝까지 env flock 을 잡는다 → recover 는 flock 을 잡았을 때만 불린다 → RUNNING 은 주인이 없다」로 PID · heartbeat 검사를 없앴다. 마이그레이션 없음. 652 passed

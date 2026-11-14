@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import fcntl
 import json
-import os
 import re
 import sqlite3
 from collections.abc import Generator
 from contextlib import contextmanager
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -20,16 +19,6 @@ class BusyError(RuntimeError):
 
 def now() -> str:
     return datetime.now(UTC).isoformat()
-
-
-def pid_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-        return True
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
 
 
 class Registry:
@@ -102,18 +91,20 @@ class Registry:
                 fcntl.flock(handle, fcntl.LOCK_UN)
 
     def recover(self, name: str) -> None:
-        cutoff = datetime.now(UTC) - timedelta(minutes=10)
+        """Interrupt RUNNING operations left by a process that died.
+
+        Called only while holding the environment flock, and every operation runs under that
+        lock from start to finish. The kernel releases a flock when its holder exits, so a
+        RUNNING row seen here has no live owner. PID and heartbeat checks are not used: after a
+        container restart PIDs are reused, and the hub and bot containers do not share a PID
+        namespace.
+        """
         with self.transaction() as db:
             rows = db.execute(
                 "SELECT o.*,e.state AS environment_state FROM operations o JOIN environments e ON e.id=o.environment_id WHERE e.name=? AND o.status='RUNNING'",
                 (name,),
             ).fetchall()
             for op in rows:
-                if (
-                    pid_alive(op["pid"])
-                    and datetime.fromisoformat(op["heartbeat_at"]) >= cutoff
-                ):
-                    raise BusyError(f"Operation in progress: {name}")
                 error = json.dumps(
                     {
                         "stage": {
