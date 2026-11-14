@@ -44,11 +44,11 @@
 | PH-3 | inventory API + `scripts/phub-remote` | 배포 | PR (#23 위에 쌓음) |
 | PH-10 | hub 재시작 뒤 중단 작업 즉시 회수 | 배포 | PR (#24 위에 쌓음) |
 | PH-6 | 생성 단계별 시간 기록 | 배포 | PR (#25 위에 쌓음) |
-| PH-7 | 한 환경 안 서비스 빌드 병렬화 | 배포 | 대기 |
+| PH-7 | 한 환경 안 서비스 빌드 병렬화 | 배포 | PR (#26 위에 쌓음) |
 | PH-5 | 봇 명령을 polling 에서 떼어 냄 | 배포 | 대기 |
 | PH-8 | 남는 파일 정리(gc) | 배포 | 대기 |
 | PH-9 | 환경 namespace 방어(PSA, SA 토큰, egress) | 배포 | 대기 |
-| PH-4 / HL-2 | GitHub 토큰 마운트, secrets.sh | 클러스터 | 대기 |
+| PH-4 / HL-2 | GitHub 토큰 마운트, secrets.sh | 클러스터 | homelab#201(머지=배포, 승인 필요) · homelab#202 |
 | HL-1 | 레지스트리 NetworkPolicy 좁히기 | 클러스터 + 실측 | 대기 |
 | HL-3 | `/metrics` · 경보 | 배포 + 클러스터 + Cloudflare | 대기 |
 | HL-4 | hub 쓰기 범위 VAP | 클러스터 | 대기 |
@@ -62,3 +62,6 @@
 - 2026-11-14 PH-3: `GET /api/environments/{name}/inventory`, `scripts/phub-remote`(cloudflared access curl). 650 passed. 실제 Access 경유 호출은 배포 뒤 소유자 세션으로 확인 필요
 - 2026-11-14 PH-10: 점검 노트의 제안(작업 행에 host/instance 저장)은 쓰지 않았다. bot 은 hub 와 같은 파드의 다른 컨테이너(shareProcessNamespace 없음)라 instance 가 달라, hub GC 가 살아 있는 bot 작업을 끊는다. 대신 「작업은 처음부터 끝까지 env flock 을 잡는다 → recover 는 flock 을 잡았을 때만 불린다 → RUNNING 은 주인이 없다」로 PID · heartbeat 검사를 없앴다. 마이그레이션 없음. 652 passed
 - 2026-11-14 PH-6: operation_stages 테이블(마이그레이션 0004), resolve · checkout · build(서비스별) · apply · health · delete. 상세 API 와 `status --format json` 에 stages. 660 passed
+- 2026-11-14 PH-7: 바뀐 서비스를 ThreadPoolExecutor(build_concurrency)로 병렬 빌드, 실패는 제출 순서상 첫 실패 서비스로 보고. 665 passed
+- 2026-11-14 PH-4: homelab#201 — Secret 디렉터리 마운트 /run/phub-secrets/github + PHUB_GITHUB_TOKEN_FILE. 머지 = Argo CD 반영(파드 재시작) → 소유자 승인 · AQP-1 세션 조율 필요. preview-hub README 의 토큰 경로 문구는 적용 뒤 고친다
+- 2026-11-14 HL-2: homelab#202 — secrets.sh 가 파일 · stdin(github), 인자(access)로 값을 받는다. 클러스터 영향 없음

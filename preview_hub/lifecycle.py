@@ -8,6 +8,7 @@ import shutil
 import threading
 import time
 from collections.abc import Callable, Generator
+from concurrent.futures import FIRST_EXCEPTION, Future, ThreadPoolExecutor, wait
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime, timedelta
@@ -261,18 +262,36 @@ def _provision(
                         )
             _state(ctx, env_id, "BUILDING", op)
             stage = "build"
-            for service in plan.services:
-                current = service.name
-                if current in changed:
-                    with _build_slot(ctx), _stage(ctx, op, "build", current):
-                        images[current] = ctx.runner.build(
-                            current,
-                            commits[current],
-                            sources[current],
-                            manifests[current],
-                        )
-                else:
-                    images[current] = previous[current]["image"]
+
+            def build(service: str) -> str:
+                with _build_slot(ctx), _stage(ctx, op, "build", service):
+                    return ctx.runner.build(
+                        service, commits[service], sources[service], manifests[service]
+                    )
+
+            with ThreadPoolExecutor(max_workers=ctx.catalog.build_concurrency) as pool:
+                builds: dict[str, Future[str]] = {}
+                for service in plan.services:
+                    if service.name in changed:
+                        builds[service.name] = pool.submit(build, service.name)
+                    else:
+                        images[service.name] = previous[service.name]["image"]
+                if builds:
+                    done, pending_builds = wait(
+                        builds.values(), return_when=FIRST_EXCEPTION
+                    )
+                    if any(future.exception() is not None for future in done):
+                        for future in pending_builds:
+                            future.cancel()
+            # Running builds and their stage rows must finish before reporting failure.
+            for current, future in builds.items():
+                if (
+                    not future.cancelled()
+                    and (failure := future.exception()) is not None
+                ):
+                    raise failure
+            for current, future in builds.items():
+                images[current] = future.result()
             plan = PlanBuilder().build(
                 spec.name,
                 manifests,

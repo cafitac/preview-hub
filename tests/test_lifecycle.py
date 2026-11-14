@@ -1,6 +1,8 @@
 import fcntl
 import json
 import os
+import threading
+import time
 from dataclasses import replace
 
 import pytest
@@ -457,6 +459,7 @@ def test_operation_stage_timings(ctx, services):
     for service in services:
         ctx.catalog.services[service] = CatalogEntry(f"org/{service}", "main")
         ctx.git.manifests[f"org/{service}"] = manifest(service)
+    ctx.catalog = replace(ctx.catalog, build_concurrency=1)
     env = CreateEnvironment(ctx).execute(spec(**dict.fromkeys(services, "main")))
     rows = ctx.registry.latest_stages(env["id"])
     assert [(r["stage"], r["service"]) for r in rows] == [
@@ -523,3 +526,83 @@ def test_stage_writes_from_parallel_threads(ctx):
     with ThreadPoolExecutor(max_workers=4) as pool:
         list(pool.map(record, [f"worker-{i}" for i in range(4)]))
     assert all(r["status"] == "SUCCEEDED" for r in ctx.registry.stages(1))
+
+
+@pytest.fixture
+def two_build_services(ctx):
+    from conftest import manifest
+
+    from preview_hub.contracts import CatalogEntry
+
+    ctx.catalog.services["frontend"] = CatalogEntry("org/frontend", "main")
+    ctx.git.manifests["org/frontend"] = manifest("frontend")
+    return ctx
+
+
+@pytest.mark.parametrize("concurrency", [1, 2])
+def test_changed_services_build_concurrency(
+    two_build_services, monkeypatch, concurrency
+):
+    ctx = two_build_services
+    ctx.catalog = replace(ctx.catalog, build_concurrency=concurrency)
+    barrier = threading.Barrier(2, timeout=5)
+    lock = threading.Lock()
+    active = maximum = 0
+    original = ctx.runner.build
+
+    def build(service, commit, source, manifest):
+        nonlocal active, maximum
+        with lock:
+            active += 1
+            maximum = max(maximum, active)
+        try:
+            if concurrency == 2:
+                barrier.wait()
+            else:
+                time.sleep(0.02)
+            return original(service, commit, source, manifest)
+        finally:
+            with lock:
+                active -= 1
+
+    monkeypatch.setattr(ctx.runner, "build", build)
+    env = CreateEnvironment(ctx).execute(spec(backend="main", frontend="main"))
+    assert env["state"] == "READY"
+    assert maximum == concurrency
+    assert len(ctx.runner.builds) == 2
+
+
+@pytest.mark.parametrize("failing", ["backend", "frontend", "both"])
+def test_parallel_build_failure_finishes_stages(
+    two_build_services, monkeypatch, failing
+):
+    ctx = two_build_services
+    barrier = threading.Barrier(2, timeout=5)
+    original = ctx.runner.build
+
+    def build(service, commit, source, manifest):
+        barrier.wait()
+        if failing == "both" or service == failing:
+            raise RuntimeError(f"failed {service}")
+        time.sleep(0.02)
+        return original(service, commit, source, manifest)
+
+    monkeypatch.setattr(ctx.runner, "build", build)
+    with pytest.raises(OperationFailed) as error:
+        CreateEnvironment(ctx).execute(spec(backend="main", frontend="main"))
+    expected = "backend" if failing == "both" else failing
+    assert error.value.failure.stage == "build"
+    assert error.value.failure.service == expected
+    assert error.value.failure.message == f"failed {expected}"
+    env = ctx.registry.get("feat-x")
+    assert env["state"] == "FAILED"
+    rows = {
+        row["service"]: row
+        for row in ctx.registry.latest_stages(env["id"])
+        if row["stage"] == "build"
+    }
+    assert rows[expected]["status"] == "FAILED"
+    assert all(row["status"] != "RUNNING" for row in rows.values())
+    if failing != "both":
+        other = "frontend" if failing == "backend" else "backend"
+        assert other not in rows or rows[other]["status"] == "SUCCEEDED"
