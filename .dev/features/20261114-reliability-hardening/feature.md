@@ -11,7 +11,7 @@
 - Updated: 2026-11-14
 - 근거: agent-skills `.dev/notes/preview-hub-ai-qa-audit-20261114.md` 「브리프 A」(ID PH-*, HL-*)
 - Current slice: S1 — 백로그 순서대로 ID 하나씩
-- Current PR unit: PH-2
+- Current PR unit: PH-1
 - Delivery strategy: STANDALONE (PR 하나 = ID 하나, 각각 독립 머지)
 - Current delivery bundle: N/A
 - Target/base: main
@@ -39,7 +39,7 @@
 
 | 단위 | 내용 | 결정 | 상태 |
 | --- | --- | --- | --- |
-| PH-2 | init Job 실패를 600초 기다리지 않고 바로 끝낸다 | 배포 | PUBLISHING |
+| PH-2 | init Job 실패를 600초 기다리지 않고 바로 끝낸다 | 배포 | #22 CI 통과, 머지 대기 |
 | PH-1 | descriptor 의 readiness 를 live 로 계산 | 배포 | 대기 |
 | PH-3 | inventory API + `scripts/phub-remote` | 배포 | 대기 |
 | PH-10 | hub 재시작 뒤 중단 작업 즉시 회수 | 배포 | 대기 |
@@ -57,3 +57,4 @@
 ## 진행 기록
 - 2026-11-14: AQP-1 sprint 세션(「agent-skills 작업」)이 P8 실환경 검증에 hub API 로 환경을 만든다. hub 배포나 클러스터 변경 전에는 그 세션에 먼저 알린다(코드 PR 은 조율 불필요)
 - 2026-11-14 PH-2: `kubectl wait` 를 `get job` 2초 폴링으로 바꿈. Failed 조건이면 바로 실패 + Job 로그 50줄. 검증 625 passed(ruff · pyright 통과)
+- 2026-11-14 PH-2: PR #22 게시, CI 통과(5ad9bf0). 머지는 소유자. 배포는 다음 hub 이미지 태그와 함께(소유자 승인)
