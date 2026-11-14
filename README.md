@@ -20,8 +20,10 @@ cluster Traefik (Ingress + Middleware) ◀── Cloudflare Tunnel (*.cafitac.co
 - `runner: kubernetes` (or `PHUB_RUNNER=kubernetes`) selects it. The runner port is
   unchanged: plans, registry and the environment description do not know about Docker
   or Kubernetes, so ai-qa needed no change.
-- Isolation: a ResourceQuota and a NetworkPolicy (same namespace and Traefik only)
-  per namespace. `destroy` deletes only namespaces carrying the owner label.
+- Isolation: each namespace has a ResourceQuota, baseline Pod Security enforcement
+  (restricted warnings), and pod templates disable ServiceAccount token mounting.
+  NetworkPolicy allows ingress from its own namespace and Traefik; egress permits only
+  cluster DNS, its own namespace and public addresses. `destroy` checks the owner label.
 - Public routes use the same ForwardAuth (hub `/auth/verify`) and StripPrefix
   middlewares; the path-prefixed route outranks the entry service's catch-all route.
 - The switch was accepted with an ai-qa end-to-end run (up → scenarios → down, nothing

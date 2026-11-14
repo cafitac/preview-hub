@@ -35,6 +35,14 @@ def execute(
     )
 
 
+PRIVATE_CIDRS = [
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    "100.64.0.0/10",
+    "169.254.0.0/16",
+    "127.0.0.0/8",
+]
 ROLE = "dev.phub.role"
 # Pod states that will not recover on their own. Anything else that is not ready is STARTING.
 FATAL_WAITING = {
@@ -115,6 +123,7 @@ def _resource_objects(
                 "template": {
                     "metadata": {"labels": pod_labels},
                     "spec": {
+                        "automountServiceAccountToken": False,
                         "enableServiceLinks": False,
                         "containers": [
                             {
@@ -204,6 +213,7 @@ def _init_jobs(ns: str, plan: EnvironmentPlan) -> dict[str, list[dict[str, Any]]
                                 "metadata": {"labels": labels},
                                 "spec": {
                                     "restartPolicy": "Never",
+                                    "automountServiceAccountToken": False,
                                     "enableServiceLinks": False,
                                     "containers": [
                                         {
@@ -252,7 +262,15 @@ def render(plan: EnvironmentPlan, auth_url: str) -> dict[str, list[dict[str, Any
             {
                 "apiVersion": "v1",
                 "kind": "Namespace",
-                "metadata": {"name": ns, "labels": shared_labels},
+                "metadata": {
+                    "name": ns,
+                    "labels": {
+                        **shared_labels,
+                        "pod-security.kubernetes.io/enforce": "baseline",
+                        "pod-security.kubernetes.io/enforce-version": "latest",
+                        "pod-security.kubernetes.io/warn": "restricted",
+                    },
+                },
             },
             {
                 "apiVersion": "v1",
@@ -280,7 +298,46 @@ def render(plan: EnvironmentPlan, auth_url: str) -> dict[str, list[dict[str, Any
                 },
                 "spec": {
                     "podSelector": {},
-                    "policyTypes": ["Ingress"],
+                    "policyTypes": ["Ingress", "Egress"],
+                    # PR code must not reach the registry, API server or other namespaces.
+                    # Sibling public URLs resolve to Cloudflare and remain reachable.
+                    "egress": [
+                        {
+                            "to": [
+                                {
+                                    "namespaceSelector": {
+                                        "matchLabels": {
+                                            "kubernetes.io/metadata.name": "kube-system"
+                                        }
+                                    },
+                                    "podSelector": {
+                                        "matchLabels": {"k8s-app": "kube-dns"}
+                                    },
+                                }
+                            ],
+                            "ports": [
+                                {"protocol": "UDP", "port": 53},
+                                {"protocol": "TCP", "port": 53},
+                            ],
+                        },
+                        {"to": [{"podSelector": {}}]},
+                        {
+                            "to": [
+                                {
+                                    "ipBlock": {
+                                        "cidr": "0.0.0.0/0",
+                                        "except": PRIVATE_CIDRS,
+                                    }
+                                },
+                                {
+                                    "ipBlock": {
+                                        "cidr": "::/0",
+                                        "except": ["fc00::/7", "fe80::/10", "::1/128"],
+                                    }
+                                },
+                            ]
+                        },
+                    ],
                     "ingress": [
                         {"from": [{"podSelector": {}}]},
                         {
@@ -361,6 +418,7 @@ def render(plan: EnvironmentPlan, auth_url: str) -> dict[str, list[dict[str, Any
                             },
                         },
                         "spec": {
+                            "automountServiceAccountToken": False,
                             # A Service named like an env var prefix would otherwise inject
                             # e.g. BACKEND_PORT=tcp://… into every container.
                             "enableServiceLinks": False,
