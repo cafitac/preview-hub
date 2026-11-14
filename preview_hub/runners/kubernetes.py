@@ -60,9 +60,15 @@ INIT_JOB_TIMEOUT_SECONDS = 600
 INIT_JOB_POLL_SECONDS = 2
 # A new pod is refused by the namespace NetworkPolicy for about a second until
 # kube-router adds its address (measured 2026-11-14: first connect REFUSED, then
-# open). Init commands connect immediately, so allow Kubernetes to retry the pod
-# (10s, then 20s backoff) instead of failing the whole environment.
-INIT_JOB_BACKOFF_LIMIT = 2
+# open). Every Job retry is a new pod with a new address, so retries hit the same
+# window; instead each init Job first waits inside the pod until the database
+# accepts a TCP connection from that pod's own address.
+INIT_JOB_BACKOFF_LIMIT = 0
+INIT_WAIT_SECONDS = 120
+_WAIT_SCRIPT = (
+    'for i in $(seq 1 "$2"); do pg_isready -q -h "$1" -p 5432 && exit 0; sleep 1; done; '
+    'echo "database $1 did not accept connections" >&2; exit 1'
+)
 
 
 def namespace(env: str) -> str:
@@ -197,6 +203,27 @@ def init_job_name(service: str, resource: str, index: int) -> str:
     return f"{service}--{resource}--init-{index}"
 
 
+def _wait_container(service_name: str, resource: ResourcePlan) -> dict[str, Any]:
+    """Block the init command until the database is reachable from this pod."""
+    return {
+        "name": "wait-db",
+        "image": f"postgres:{resource.version}",
+        "imagePullPolicy": "IfNotPresent",
+        "command": [
+            "sh",
+            "-c",
+            _WAIT_SCRIPT,
+            "wait-db",
+            f"{service_name}--{resource.id}",
+            str(INIT_WAIT_SECONDS),
+        ],
+        "resources": {
+            "requests": {"cpu": "10m", "memory": "16Mi"},
+            "limits": {"cpu": "100m", "memory": "64Mi"},
+        },
+    }
+
+
 def _init_jobs(ns: str, plan: EnvironmentPlan) -> dict[str, list[dict[str, Any]]]:
     jobs: dict[str, list[dict[str, Any]]] = {}
     for service in plan.services:
@@ -220,6 +247,9 @@ def _init_jobs(ns: str, plan: EnvironmentPlan) -> dict[str, list[dict[str, Any]]
                                     "restartPolicy": "Never",
                                     "automountServiceAccountToken": False,
                                     "enableServiceLinks": False,
+                                    "initContainers": [
+                                        _wait_container(service.name, resource)
+                                    ],
                                     "containers": [
                                         {
                                             "name": "init",

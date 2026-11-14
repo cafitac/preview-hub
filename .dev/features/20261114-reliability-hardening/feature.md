@@ -76,3 +76,4 @@
 - 2026-11-14 HL-5: 레지스트리 GC 를 읽기 전용 모드로 돌리는 방식(CronJob 이 registry 를 readonly 로 재시작 → gc → 복구) vs hub 가 빌드 슬롯을 잡고 GC 를 트리거하는 방식 — 소유자 결정 대기
 - 2026-11-14 배포: homelab #202·#203·#205·#206 머지, hub d25f45824e27(#207). #201 은 bot 이 PHUB_GITHUB_TOKEN_FILE 을 읽지 않아(polling.py:425) `token missing` → #208 로 되돌림. HL-1 실측: registry remoteaddr 는 hub · buildkitd · 10.42.0.1(노드) 셋뿐(homelab #206). HL-6 실측: buildkit 1.2G
 - 2026-11-14 INIT-RETRY: e2e 두 번 모두 backend--db--init-1 이 DB 에 Connection refused. 새 파드가 뜬 직후 약 1초 동안 NetworkPolicy 가 연결을 거부한다(racetest: 첫 시도 FAIL, 이후 open). PH-9 이전 이미지에서도 AQP-1 P8 이 같은 Job 에서 실패했다. init Job backoffLimit 0 → 2. 681 passed
+- 2026-11-14 INIT-WAIT: hub 46ab027771c9 배포 뒤 e2e 에서 init-0 이 재시도 2번까지 세 파드 모두 Connection refused. Job 재시도는 새 파드라 매번 같은 1초 구간에 걸린다. init Job 앞에 initContainer wait-db(postgres:<버전>, pg_isready -h <db 서비스> 를 1초마다 최대 120초)를 두고 backoffLimit 은 0 으로 되돌림

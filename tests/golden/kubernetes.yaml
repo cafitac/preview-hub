@@ -184,7 +184,7 @@ backend:
       dev.phub.service: backend
       dev.phub.role: init
   spec:
-    backoffLimit: 2
+    backoffLimit: 0
     template:
       metadata:
         labels:
@@ -196,6 +196,25 @@ backend:
         restartPolicy: Never
         automountServiceAccountToken: false
         enableServiceLinks: false
+        initContainers:
+        - name: wait-db
+          image: postgres:16
+          imagePullPolicy: IfNotPresent
+          command:
+          - sh
+          - -c
+          - for i in $(seq 1 "$2"); do pg_isready -q -h "$1" -p 5432 && exit 0; sleep
+            1; done; echo "database $1 did not accept connections" >&2; exit 1
+          - wait-db
+          - backend--db
+          - '120'
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
         containers:
         - name: init
           image: phub/backend:aaaaaaaaaaaa
@@ -227,7 +246,7 @@ backend:
       dev.phub.service: backend
       dev.phub.role: init
   spec:
-    backoffLimit: 2
+    backoffLimit: 0
     template:
       metadata:
         labels:
@@ -239,6 +258,25 @@ backend:
         restartPolicy: Never
         automountServiceAccountToken: false
         enableServiceLinks: false
+        initContainers:
+        - name: wait-db
+          image: postgres:16
+          imagePullPolicy: IfNotPresent
+          command:
+          - sh
+          - -c
+          - for i in $(seq 1 "$2"); do pg_isready -q -h "$1" -p 5432 && exit 0; sleep
+            1; done; echo "database $1 did not accept connections" >&2; exit 1
+          - wait-db
+          - backend--db
+          - '120'
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
         containers:
         - name: init
           image: phub/backend:aaaaaaaaaaaa
