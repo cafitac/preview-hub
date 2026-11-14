@@ -52,7 +52,7 @@
 | HL-1 | 레지스트리 NetworkPolicy 좁히기 | 클러스터 + 실측 | 실측 대기(소유자 kubectl) |
 | HL-3 | `/metrics` · 경보 | 배포 + 클러스터 | hub 지표 PR (#30 위) + homelab#204(hub 배포와 함께 머지) |
 | HL-4 | hub 쓰기 범위 VAP | 클러스터 | homelab#203(머지=적용, 승인 필요) |
-| PH-11 · HL-5 · HL-6 | 문구 · 레지스트리 GC · buildkit 캐시 상한 | 배포 / 클러스터 | PH-11 PR (#31 위) · HL-5 결정 대기 · homelab#205 |
+| PH-11 · HL-5 · HL-6 | 문구 · 레지스트리 GC · buildkit 캐시 상한 | 배포 / 클러스터 | PH-11 PR (#31 위) · HL-5 #36 + homelab#213 · #215(배포 완료) · homelab#205 |
 
 ## 진행 기록
 - 2026-11-14: AQP-1 sprint 세션(「agent-skills 작업」)이 P8 실환경 검증에 hub API 로 환경을 만든다. hub 배포나 클러스터 변경 전에는 그 세션에 먼저 알린다(코드 PR 은 조율 불필요)
@@ -82,3 +82,4 @@
 - 2026-11-14 HL-5: hub gc 가 모든 빌드 슬롯을 잡은 상태에서 registry-gc CronJob 템플릿으로 Job 을 실행한다(PHUB_REGISTRY_GC_INTERVAL, 기본 7일, 0 은 끔). 완료 시각은 state/registry-gc.last 에 원자 저장(읽을 수 없으면 없는 것으로 봄). 실패해도 Job 삭제와 파일 정리는 하고 gc 실패로 보고한다. homelab #213(CronJob suspend, cronjobs get Role, VAP 의 registry-gc-* 예외)이 짝이다. 696 passed
 - 2026-11-14 배포(#35): hub 2a0752af3d82 + #201 재적용(homelab #211, 재시작 1회). bot 이 /run/phub-secrets/github/github_token 을 읽음(token_present=True). e2e-2a07 READY 30초, 삭제 뒤 inventory 비어 있음. 롤백 없음
 - 2026-11-14 결정(소유자, AQP-1 세션 경유): HL-5 는 hub 가 빌드 슬롯을 잡고 GC. 레지스트리 push htpasswd 는 후속(테넌트나 노드가 생기면 다시 연다). 단일 노드 전제(10.42.0.1/32)는 homelab PLAN.md 위험 표에 고칠 위치와 함께 적음(homelab #212)
+- 2026-11-14 HL-5 배포(소유자 승인): homelab #213 머지(VAP·Role·CronJob suspend 동기화, hub SA 의 registry-gc-* Job 만 허용됨을 server dry-run 으로 확인) → #215 newTag dcf4a6ff31a7. 첫 GC Job registry-gc-1794632321 완료 후 삭제, state/registry-gc.last 기록, phub_gc_failures_total 0. e2e(e2e-hl5) READY → down → inventory 비어 있음. 롤백 없음. CronJob 컨트롤러가 직접 만든 Job 이 아니라며 UnexpectedJob 경고를 남기지만 동작에는 영향 없다
