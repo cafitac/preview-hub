@@ -203,7 +203,9 @@ def test_registry_list_detail_descriptor_read_only(web, capsys, public):
         }
     ]
     assert data[0]["created_at"] and data[0]["updated_at"] and data[0]["ttl"]
-    assert client.get("/api/environments/feat-a", headers=AUTH).json() == data[0]
+    detail = client.get("/api/environments/feat-a", headers=AUTH).json()
+    assert detail.pop("stages")
+    assert detail == data[0]
     live = client.get("/api/environments/feat-a?format=descriptor", headers=AUTH).json()
     assert live["readiness"].pop("checkedAt").endswith("Z")
     descriptor["readiness"].pop("checkedAt")
@@ -676,3 +678,25 @@ def test_inventory_invalid_and_unavailable(web, monkeypatch):
     assert response.status_code == 502
     assert response.json() == {"error": "Inventory unavailable"}
     assert "private stderr" not in response.text
+
+
+def test_detail_stage_timings(web):
+    client, dashboard, _, _ = web
+    assert main(["up", "feat-a"], dashboard.context) == 0
+    detail = client.get("/api/environments/feat-a", headers=AUTH).json()
+    assert detail["stages"][-1]["stage"] == "health"
+    assert all(r["seconds"] >= 0 for r in detail["stages"])
+    assert set(detail["stages"][0]) == {
+        "stage",
+        "service",
+        "status",
+        "started_at",
+        "seconds",
+    }
+    assert "stages" not in client.get("/api/environments", headers=AUTH).json()[0]
+    assert (
+        "stages"
+        not in client.get(
+            "/api/environments/feat-a?format=descriptor", headers=AUTH
+        ).json()
+    )
