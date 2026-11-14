@@ -100,3 +100,9 @@ class ImageCollector(Protocol):
     def gc_images(
         self, retained: set[str], keep_per_service: int = 3
     ) -> tuple[str, ...]: ...
+
+
+class RegistryStorageCollector(Protocol):
+    """Optional registry blob maintenance under the CLI's build-slot locks."""
+
+    def gc_registry_storage(self) -> bool: ...

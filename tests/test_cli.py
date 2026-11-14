@@ -193,3 +193,32 @@ def test_descriptor_proxy_follows_runtime():
         "hostPort": 80,
         "inNetworkAddress": traefik,
     }
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_registry_gc_holds_all_build_slots_and_cleans_up(
+    ctx, monkeypatch, fail, capsys
+):
+    import fcntl
+
+    called = []
+
+    def collect():
+        for index in range(ctx.catalog.build_concurrency):
+            path = ctx.registry.state_dir / "locks" / f"build-{index}.lock"
+            with path.open("a") as handle, pytest.raises(BlockingIOError):
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        called.append("registry")
+        if fail:
+            raise OSError("registry GC failed")
+        return True
+
+    monkeypatch.setattr(
+        ctx.runner, "gc_images", lambda retained: called.append("images"), raising=False
+    )
+    monkeypatch.setattr(ctx.runner, "gc_registry_storage", collect, raising=False)
+    monkeypatch.setattr("preview_hub.cli.cleanup", lambda ctx: called.append("cleanup"))
+    assert main(["gc", "--format", "json"], ctx) == (2 if fail else 0)
+    assert called == ["images", "registry", "cleanup"]
+    output = capsys.readouterr()
+    assert "registry GC failed" in output.err if fail else output.out.strip() == "[]"

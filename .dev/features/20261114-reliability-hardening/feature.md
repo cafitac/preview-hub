@@ -79,3 +79,6 @@
 - 2026-11-14 INIT-WAIT: hub 46ab027771c9 배포 뒤 e2e 에서 init-0 이 재시도 2번까지 세 파드 모두 Connection refused. Job 재시도는 새 파드라 매번 같은 1초 구간에 걸린다. init Job 앞에 initContainer wait-db(postgres:<버전>, pg_isready -h <db 서비스> 를 1초마다 최대 120초)를 두고 backoffLimit 은 0 으로 되돌림
 - 2026-11-14 배포 완료: hub 051f66c9d010(homelab #210), e2e-051f READY 28초(init-0·init-1 Complete), 삭제 뒤 inventory 비어 있음. #204 반영(PodMonitor, PrometheusRule, /metrics 확인)
 - 2026-11-14 BOT-TOKEN: bot 이 PHUB_GITHUB_TOKEN_FILE 을 읽도록 github.token_file() 하나로 모음(hub · web · bot 공통). 이 이미지 배포 뒤 homelab #201 을 다시 적용한다. 682 passed
+- 2026-11-14 HL-5: hub gc 가 모든 빌드 슬롯을 잡은 상태에서 registry-gc CronJob 템플릿으로 Job 을 실행한다(PHUB_REGISTRY_GC_INTERVAL, 기본 7일, 0 은 끔). 완료 시각은 state/registry-gc.last 에 원자 저장(읽을 수 없으면 없는 것으로 봄). 실패해도 Job 삭제와 파일 정리는 하고 gc 실패로 보고한다. homelab #213(CronJob suspend, cronjobs get Role, VAP 의 registry-gc-* 예외)이 짝이다. 696 passed
+- 2026-11-14 배포(#35): hub 2a0752af3d82 + #201 재적용(homelab #211, 재시작 1회). bot 이 /run/phub-secrets/github/github_token 을 읽음(token_present=True). e2e-2a07 READY 30초, 삭제 뒤 inventory 비어 있음. 롤백 없음
+- 2026-11-14 결정(소유자, AQP-1 세션 경유): HL-5 는 hub 가 빌드 슬롯을 잡고 GC. 레지스트리 push htpasswd 는 후속(테넌트나 노드가 생기면 다시 연다). 단일 노드 전제(10.42.0.1/32)는 homelab PLAN.md 위험 표에 고칠 위치와 함께 적음(homelab #212)
