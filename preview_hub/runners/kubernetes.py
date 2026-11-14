@@ -655,7 +655,14 @@ class KubernetesRunner:
     def health(self, env: str) -> dict[str, Health]:
         ns = namespace(env)
         deployments = self._json("get", "deployment", "-n", ns, "-l", f"{ROLE}=service")
-        pods = self._json("get", "pod", "-n", ns, "-l", f"{ROLE}=service")
+        pods = self._json("get", "pod", "-n", ns, "-l", f"{ROLE} in (service,resource)")
+        resources = self._json("get", "statefulset", "-n", ns, "-l", f"{ROLE}=resource")
+        starting = {
+            item["metadata"]["labels"]["dev.phub.service"]
+            for item in resources.get("items", [])
+            if item.get("status", {}).get("readyReplicas", 0)
+            < item.get("spec", {}).get("replicas", 1)
+        }
         stuck: set[str] = set()
         for pod in pods.get("items", []):
             for status in pod.get("status", {}).get("containerStatuses", []):
@@ -667,7 +674,10 @@ class KubernetesRunner:
             service = item["metadata"]["labels"]["dev.phub.service"]
             if service in stuck:
                 result[service] = Health.UNHEALTHY
-            elif item.get("status", {}).get("readyReplicas", 0) >= 1:
+            elif (
+                service not in starting
+                and item.get("status", {}).get("readyReplicas", 0) >= 1
+            ):
                 result[service] = Health.HEALTHY
             else:
                 result[service] = Health.STARTING

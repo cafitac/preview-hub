@@ -416,6 +416,7 @@ def deployment(service, ready):
 
 def test_health(tmp_path):
     kubectl = Kubectl()
+    kubectl.responses[("get", "statefulset")] = json.dumps({"items": []})
     kubectl.responses[("get", "deployment")] = json.dumps(
         {
             "items": [
@@ -513,3 +514,29 @@ def test_namespace_validates_env():
     assert namespace("test-one") == "phub-test-one"
     with pytest.raises(InvalidInput):
         namespace("Bad_Name")
+
+
+@pytest.mark.parametrize(
+    "ready,reason,expected",
+    [
+        (0, None, Health.STARTING),
+        (1, "CrashLoopBackOff", Health.UNHEALTHY),
+        (1, None, Health.HEALTHY),
+    ],
+)
+def test_health_includes_resources(tmp_path, ready, reason, expected):
+    kubectl = Kubectl()
+    kubectl.responses[("get", "deployment")] = json.dumps(
+        {"items": [deployment("backend", True)]}
+    )
+    resource = deployment("backend", False)
+    resource["status"] = {"readyReplicas": ready}
+    orphan = deployment("orphan", False)
+    kubectl.responses[("get", "statefulset")] = json.dumps(
+        {"items": [resource, orphan]}
+    )
+    resource_pod = pod("backend", reason)
+    resource_pod["metadata"]["labels"]["dev.phub.role"] = "resource"
+    kubectl.responses[("get", "pod")] = json.dumps({"items": [resource_pod]})
+    assert runner(tmp_path, kubectl).health("test-one") == {"backend": expected}
+    assert any("dev.phub.role in (service,resource)" in call for call in kubectl.calls)

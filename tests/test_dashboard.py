@@ -203,10 +203,10 @@ def test_registry_list_detail_descriptor_read_only(web, capsys, public):
     ]
     assert data[0]["created_at"] and data[0]["updated_at"] and data[0]["ttl"]
     assert client.get("/api/environments/feat-a", headers=AUTH).json() == data[0]
-    assert (
-        client.get("/api/environments/feat-a?format=descriptor", headers=AUTH).json()
-        == descriptor
-    )
+    live = client.get("/api/environments/feat-a?format=descriptor", headers=AUTH).json()
+    assert live["readiness"].pop("checkedAt").endswith("Z")
+    descriptor["readiness"].pop("checkedAt")
+    assert live == descriptor
     assert client.get("/api/environments/missing", headers=AUTH).status_code == 404
     assert client.get("/api/environments/INVALID", headers=AUTH).status_code == 400
     assert ctx.registry.path.read_bytes() == before
@@ -593,3 +593,34 @@ def test_requested_by_update_and_delete(ctx):
         assert actors[1:] == ["web:owner@example.com", "web:owner@example.com"]
     finally:
         db.close()
+
+
+def test_descriptor_cache_expires(web, monkeypatch):
+    client, dashboard, _, _ = web
+    ctx = dashboard.context
+    main(["up", "feat-a"], ctx)
+    clock = [0.0]
+    dashboard.clock = lambda: clock[0]
+    health_calls = []
+    manifest_calls = []
+    health = ctx.runner.health
+    read_manifest = ctx.git.read_manifest
+
+    def counted_health(name):
+        health_calls.append(name)
+        return health(name)
+
+    def counted_manifest(repo, commit):
+        manifest_calls.append(repo)
+        return read_manifest(repo, commit)
+
+    monkeypatch.setattr(ctx.runner, "health", counted_health)
+    monkeypatch.setattr(ctx.git, "read_manifest", counted_manifest)
+    url = "/api/environments/feat-a?format=descriptor"
+    first = client.get(url, headers=AUTH)
+    clock[0] = 4.9
+    assert client.get(url, headers=AUTH).json() == first.json()
+    assert len(health_calls) == len(manifest_calls) == 1
+    clock[0] = 5.1
+    assert client.get(url, headers=AUTH).status_code == 200
+    assert len(health_calls) == len(manifest_calls) == 2

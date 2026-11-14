@@ -34,6 +34,7 @@ from .lifecycle import (
     UpdateEnvironment,
 )
 from .registry import BusyError, Registry
+from .registry import now as registry_now
 from .runner import Health, ImageCollector, Runner
 
 
@@ -48,6 +49,9 @@ def descriptor(
     entry_service: str = "frontend",
     proxy_address: str = "phub-proxy:80",
     proxy_port: int | None = None,
+    live_health: dict[str, Health] | None = None,
+    checked_at: str | None = None,
+    health_error: bool = False,
 ) -> dict[str, Any]:
     services = [
         {
@@ -56,7 +60,9 @@ def descriptor(
             "ref": s["requested_ref"],
             "commit": s["commit_sha"],
             "publicUrl": s["public_url"],
-            "health": s["health"] or "UNKNOWN",
+            "health": live_health.get(s["service"], Health.UNKNOWN)
+            if live_health is not None
+            else s["health"] or "UNKNOWN",
         }
         for s in env["services"]
     ]
@@ -83,10 +89,11 @@ def descriptor(
         "services": services,
         "testAccounts": [],
         "readiness": {
-            "allHealthy": env["state"] == "READY"
+            "allHealthy": not health_error
+            and env["state"] == "READY"
             and bool(services)
             and all(s["health"] == Health.HEALTHY for s in services),
-            "checkedAt": env["updated_at"],
+            "checkedAt": checked_at if checked_at is not None else env["updated_at"],
         },
     }
     if local_urls is not None:
@@ -94,7 +101,18 @@ def descriptor(
     return validate("environment-descriptor", result)
 
 
-def environment_descriptor(ctx: Context, result: dict[str, Any]) -> dict[str, Any]:
+def environment_descriptor(
+    ctx: Context, result: dict[str, Any], now: str | None = None
+) -> dict[str, Any]:
+    live_health = None
+    checked_at = None
+    health_error = False
+    if result["state"] == "READY":
+        checked_at = (now if now is not None else registry_now()).replace("+00:00", "Z")
+        try:
+            live_health = ctx.runner.health(result["name"])
+        except Exception:  # noqa: BLE001 - Failed live checks must fail readiness closed.
+            health_error = True
     local_urls: dict[str, str] | None = None
     entry_service = "frontend"
     if access := ctx.catalog.public_access:
@@ -115,6 +133,9 @@ def environment_descriptor(ctx: Context, result: dict[str, Any]) -> dict[str, An
         entry_service,
         os.environ.get("PHUB_PROXY_ADDRESS") or "phub-proxy:80",
         int(port) if port else None,
+        live_health,
+        checked_at,
+        health_error,
     )
 
 

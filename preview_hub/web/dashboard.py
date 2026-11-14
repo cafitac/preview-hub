@@ -79,6 +79,8 @@ class Dashboard:
         self.spawner = spawner
         self.clock = clock
         self.lock = threading.Lock()
+        self.descriptor_lock = threading.Lock()
+        self.descriptor_cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self.context_lock = threading.Lock()
         self.repo_locks: dict[str, threading.Lock] = {}
         self.cache: dict[str, tuple[float, dict[str, Any]]] = {}
@@ -214,7 +216,19 @@ class Dashboard:
         if not rows:
             return JSONResponse({"error": "Environment not found"}, status_code=404)
         if request.query_params.get("format") == "descriptor":
-            return JSONResponse(environment_descriptor(self.context, rows[0]))
+            with self.descriptor_lock:
+                cached = self.descriptor_cache.get(name)
+                if cached is None or self.clock() - cached[0] >= 5:
+                    document = environment_descriptor(self.context, rows[0])
+                    checked = self.clock()
+                    self.descriptor_cache = {
+                        key: value
+                        for key, value in self.descriptor_cache.items()
+                        if checked - value[0] < 5
+                    }
+                    cached = (checked, document)
+                    self.descriptor_cache[name] = cached
+                return JSONResponse(cached[1])
         return JSONResponse(self.summary(rows[0]))
 
     def page(self, request: Request) -> Response:
