@@ -168,6 +168,8 @@ class Dashboard:
                         (row["id"],),
                     )
                 ]
+                if name:
+                    env["stages"] = self.context.registry.latest_stages(row["id"], db)
                 result.append(env)
             return result
         finally:
@@ -229,7 +231,7 @@ class Dashboard:
                     cached = (checked, document)
                     self.descriptor_cache[name] = cached
                 return JSONResponse(cached[1])
-        return JSONResponse(self.summary(rows[0]))
+        return JSONResponse({**self.summary(rows[0]), "stages": rows[0]["stages"]})
 
     def inventory(self, request: Request) -> Response:
         try:

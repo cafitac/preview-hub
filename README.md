@@ -359,6 +359,7 @@ The JSON API uses the same Access authentication:
 - `GET /api/catalog`: service defaults, branches and non-fork open PRs, cached per
   repository for 60 seconds. A repository failure adds an `error` to its services.
 - `GET /api/environments`: active registry entries, without lifecycle reconciliation.
+- `GET /api/environments/{name}` includes `stages` for the latest operation with per-stage status, start time and elapsed seconds.
 - `GET /api/environments/{name}`: one entry; `?format=descriptor` uses the same
   descriptor implementation as `phub status --format descriptor`.
 - `GET /api/environments/{name}/inventory`: runtime `containers`, `networks`,

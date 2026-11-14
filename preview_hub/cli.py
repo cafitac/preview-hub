@@ -310,6 +310,8 @@ def main(argv: list[str] | None = None, context: Context | None = None) -> int:
             result = UpdateEnvironment(ctx).execute(args.name, refs, actor)
         elif args.command == "status":
             result = DescribeEnvironment(ctx).execute(args.name)
+            if args.format == "json":
+                result["stages"] = ctx.registry.latest_stages(result["id"])
         elif args.command == "down":
             result = DeleteEnvironment(ctx).execute(args.name, actor)
         elif args.command == "list":

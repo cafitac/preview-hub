@@ -151,6 +151,47 @@ class Registry:
             if own:
                 connection.close()
 
+    def stages(self, operation_id: int) -> list[dict[str, Any]]:
+        db = self.connect()
+        try:
+            return self._stages(db, operation_id)
+        finally:
+            db.close()
+
+    @staticmethod
+    def _stages(db: sqlite3.Connection, operation_id: int) -> list[dict[str, Any]]:
+        result: list[dict[str, Any]] = []
+        for row in db.execute(
+            "SELECT stage,service,status,started_at,finished_at FROM operation_stages WHERE operation_id=? ORDER BY id",
+            (operation_id,),
+        ):
+            stage = dict(row)
+            finished = stage.pop("finished_at")
+            stage["seconds"] = (
+                (
+                    datetime.fromisoformat(finished)
+                    - datetime.fromisoformat(stage["started_at"])
+                ).total_seconds()
+                if finished
+                else None
+            )
+            result.append(stage)
+        return result
+
+    def latest_stages(
+        self, environment_id: int, db: sqlite3.Connection | None = None
+    ) -> list[dict[str, Any]]:
+        connection = db or self.connect()
+        try:
+            op = connection.execute(
+                "SELECT id FROM operations WHERE environment_id=? ORDER BY id DESC LIMIT 1",
+                (environment_id,),
+            ).fetchone()
+            return self._stages(connection, op[0]) if op else []
+        finally:
+            if db is None:
+                connection.close()
+
     def list(self) -> list[dict[str, Any]]:
         db = self.connect()
         try:

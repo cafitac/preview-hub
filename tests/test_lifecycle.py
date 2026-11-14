@@ -153,7 +153,7 @@ def test_descriptor_and_migration(ctx):
             db.execute("SELECT value FROM schema_meta WHERE key='version'").fetchone()[
                 0
             ]
-            == "3"
+            == "4"
         )
         assert (
             "WHERE state != 'DELETED'"
@@ -444,3 +444,82 @@ def test_descriptor_non_ready_uses_stored_health(ctx, monkeypatch):
         "checkedAt": env["updated_at"],
     }
     assert document["services"][0]["health"] == "HEALTHY"
+
+
+@pytest.mark.parametrize("services", [("backend",), ("backend", "frontend")])
+def test_operation_stage_timings(ctx, services):
+    from datetime import datetime
+
+    from conftest import manifest
+
+    from preview_hub.contracts import CatalogEntry
+
+    for service in services:
+        ctx.catalog.services[service] = CatalogEntry(f"org/{service}", "main")
+        ctx.git.manifests[f"org/{service}"] = manifest(service)
+    env = CreateEnvironment(ctx).execute(spec(**dict.fromkeys(services, "main")))
+    rows = ctx.registry.latest_stages(env["id"])
+    assert [(r["stage"], r["service"]) for r in rows] == [
+        pair
+        for service in services
+        for pair in [("resolve", service), ("checkout", service)]
+    ] + [("build", service) for service in services] + [
+        ("apply", None),
+        ("health", None),
+    ]
+    assert all(r["status"] == "SUCCEEDED" and r["seconds"] >= 0 for r in rows)
+    with ctx.registry.connect() as db:
+        timestamps = [
+            datetime.fromisoformat(value)
+            for row in db.execute(
+                "SELECT started_at,finished_at FROM operation_stages ORDER BY id"
+            )
+            for value in row
+        ]
+    assert timestamps == sorted(timestamps)
+    UpdateEnvironment(ctx).execute("feat-x", {"backend": "main"})
+    assert "build" not in [r["stage"] for r in ctx.registry.latest_stages(env["id"])]
+    DeleteEnvironment(ctx).execute("feat-x")
+    assert [r["stage"] for r in ctx.registry.latest_stages(env["id"])] == ["delete"]
+
+
+@pytest.mark.parametrize("failure,last", [("build", "build"), ("start", "apply")])
+def test_failed_operation_stage(ctx, failure, last):
+    ctx.runner.fail_at = failure
+    with pytest.raises(OperationFailed):
+        CreateEnvironment(ctx).execute(spec())
+    env = ctx.registry.get("feat-x")
+    rows = ctx.registry.latest_stages(env["id"])
+    assert rows[-1]["stage"] == last
+    assert rows[-1]["status"] == "FAILED"
+    assert rows[-1]["seconds"] >= 0
+    assert all(r["status"] == "SUCCEEDED" for r in rows[:-1])
+    assert "health" not in [r["stage"] for r in rows]
+
+
+def test_status_json_stages(ctx, capsys):
+    CreateEnvironment(ctx).execute(spec())
+    assert main(["status", "feat-x", "--format", "json"], ctx) == 0
+    assert json.loads(capsys.readouterr().out)["stages"][-1]["stage"] == "health"
+
+
+def test_stage_writes_from_parallel_threads(ctx):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from preview_hub.lifecycle import _stage
+
+    CreateEnvironment(ctx).execute(spec())
+    barrier = threading.Barrier(4)
+
+    def record(service):
+        with _stage(ctx, 1, "build", service):
+            barrier.wait(timeout=5)
+            rows = ctx.registry.stages(1)
+            running = [r for r in rows if r["service"] == service]
+            assert running[-1]["status"] == "RUNNING"
+            assert running[-1]["seconds"] is None
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        list(pool.map(record, [f"worker-{i}" for i in range(4)]))
+    assert all(r["status"] == "SUCCEEDED" for r in ctx.registry.stages(1))

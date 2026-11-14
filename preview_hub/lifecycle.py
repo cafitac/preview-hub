@@ -59,6 +59,30 @@ class Context:
 
 
 @contextmanager
+def _stage(
+    ctx: Context, op: int, stage: str, service: str | None = None
+) -> Generator[None]:
+    with ctx.registry.transaction() as db:
+        cursor = db.execute(
+            "INSERT INTO operation_stages(operation_id,stage,service,started_at,status) VALUES (?,?,?,?,'RUNNING')",
+            (op, stage, service, now()),
+        )
+        stage_id = cursor.lastrowid
+    status = "SUCCEEDED"
+    try:
+        yield
+    except BaseException:
+        status = "FAILED"
+        raise
+    finally:
+        with ctx.registry.transaction() as db:
+            db.execute(
+                "UPDATE operation_stages SET finished_at=?,status=? WHERE id=?",
+                (now(), status, stage_id),
+            )
+
+
+@contextmanager
 def _heartbeat(ctx: Context, op: int) -> Generator[None]:
     stop = threading.Event()
 
@@ -169,21 +193,24 @@ def _provision(
                 current = pending.pop(0)
                 entry = ctx.catalog.services[current]
                 prior = previous.get(current)
-                sha = (
-                    pr_pins[current]
-                    if current in pr_pins
-                    else ctx.git.resolve(entry.repo, refs[current])
-                    if current in changes or prior is None
-                    else str(prior["commit_sha"])
-                )
-                if len(sha) != 40 or any(c not in "0123456789abcdef" for c in sha):
-                    raise InvalidInput("GitSource returned invalid commit")
-                manifest = ctx.git.read_manifest(entry.repo, sha)
+                with _stage(ctx, op, "resolve", current):
+                    sha = (
+                        pr_pins[current]
+                        if current in pr_pins
+                        else ctx.git.resolve(entry.repo, refs[current])
+                        if current in changes or prior is None
+                        else str(prior["commit_sha"])
+                    )
+                    if len(sha) != 40 or any(c not in "0123456789abcdef" for c in sha):
+                        raise InvalidInput("GitSource returned invalid commit")
+                # read_manifest reads from the checkout, so fetch first to time it here.
+                with _stage(ctx, op, "checkout", current):
+                    sources[current] = ctx.git.checkout(entry.repo, sha)
+                    manifest = ctx.git.read_manifest(entry.repo, sha)
                 if manifest.service != current:
                     raise InvalidInput("Manifest service does not match catalog key")
                 manifests[current] = manifest
                 commits[current] = sha
-                sources[current] = ctx.git.checkout(entry.repo, sha)
                 images[current] = f"phub/{current}:{sha[:12]}"
                 for dep in manifest.requires:
                     target = str(dep["service"])
@@ -237,7 +264,7 @@ def _provision(
             for service in plan.services:
                 current = service.name
                 if current in changed:
-                    with _build_slot(ctx):
+                    with _build_slot(ctx), _stage(ctx, op, "build", current):
                         images[current] = ctx.runner.build(
                             current,
                             commits[current],
@@ -282,16 +309,17 @@ def _provision(
             )
             _state(ctx, env_id, "STARTING", op)
             stage, current = "start", None
-            result = ctx.runner.apply(plan)
-            if not result.success:
-                raise OperationFailed(
-                    FailureInfo(
-                        stage,
-                        result.service,
-                        result.message,
-                        result.log_excerpt or result.message[-2000:],
+            with _stage(ctx, op, "apply"):
+                result = ctx.runner.apply(plan)
+                if not result.success:
+                    raise OperationFailed(
+                        FailureInfo(
+                            stage,
+                            result.service,
+                            result.message,
+                            result.log_excerpt or result.message[-2000:],
+                        )
                     )
-                )
             with ctx.registry.transaction() as db:
                 for service in plan.services:
                     db.execute(
@@ -303,18 +331,19 @@ def _provision(
                 s.name: time.monotonic() + duration(str(s.manifest.health["timeout"]))
                 for s in plan.services
             }
-            while True:
-                health = ctx.runner.health(spec.name)
-                if all(health.get(s.name) == Health.HEALTHY for s in plan.services):
-                    break
-                for service in plan.services:
-                    current = service.name
-                    if health.get(current) == Health.UNHEALTHY or (
-                        health.get(current) != Health.HEALTHY
-                        and time.monotonic() >= deadlines[current]
-                    ):
-                        raise RuntimeError(f"Health check failed: {current}")
-                time.sleep(ctx.poll_interval)
+            with _stage(ctx, op, "health"):
+                while True:
+                    health = ctx.runner.health(spec.name)
+                    if all(health.get(s.name) == Health.HEALTHY for s in plan.services):
+                        break
+                    for service in plan.services:
+                        current = service.name
+                        if health.get(current) == Health.UNHEALTHY or (
+                            health.get(current) != Health.HEALTHY
+                            and time.monotonic() >= deadlines[current]
+                        ):
+                            raise RuntimeError(f"Health check failed: {current}")
+                    time.sleep(ctx.poll_interval)
             with ctx.registry.transaction() as db:
                 for service, value in health.items():
                     db.execute(
@@ -478,7 +507,7 @@ def _delete_locked(
             )
     try:
         if op is not None:
-            with _heartbeat(ctx, op):
+            with _heartbeat(ctx, op), _stage(ctx, op, "delete"):
                 ctx.runner.destroy(name)
         else:
             ctx.runner.destroy(name)

@@ -473,7 +473,7 @@ def test_revision_one_migration(tmp_path):
             db.execute("SELECT value FROM schema_meta WHERE key='version'").fetchone()[
                 0
             ]
-            == "3"
+            == "4"
         )
         assert [row[1] for row in db.execute("PRAGMA table_info(bot_comments)")] == [
             "comment_id",

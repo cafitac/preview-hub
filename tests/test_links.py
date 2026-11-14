@@ -219,7 +219,7 @@ def test_revision_two_upgrade(tmp_path):
             db.execute("SELECT value FROM schema_meta WHERE key='version'").fetchone()[
                 0
             ]
-            == "3"
+            == "4"
         )
         assert [
             r["name"]
