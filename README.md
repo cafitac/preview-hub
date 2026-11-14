@@ -164,6 +164,15 @@ files. Tests use synthetic local Git repositories and never contact a remote.
 
 ## Serving and GC
 
+`PHUB_METRICS_PORT` serves Prometheus metrics on a separate plain HTTP listener
+(default `9100`; `0` or empty disables it). Only `GET /metrics` is supported.
+This port is not behind Cloudflare Access: do not expose it through an Ingress
+or Service except for in-cluster scraping.
+The metrics are `phub_environments{state="<STATE>"}` (non-DELETED counts, including
+zeroes), `phub_operation_running_oldest_seconds`,
+`phub_gc_last_success_timestamp_seconds` (0 before the first successful GC in this
+process), `phub_gc_failures_total`, and `phub_up`.
+
 GC deletes expired environments and unused cached images, unused source checkouts older
 than 7 days, web operation logs older than 14 days, and rendered manifests for deleted
 environments. Environment lock files are removed 14 days after deletion (or after their

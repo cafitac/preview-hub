@@ -17,6 +17,7 @@ from starlette.types import ASGIApp
 
 from ..access import AccessDenied, AccessVerifier, Identity
 from ..lifecycle import Context
+from ..metrics import Metrics, start_server
 from .dashboard import Dashboard
 
 
@@ -58,16 +59,31 @@ def create_app(
     gc: Callable[[], object] | None = None,
     interval: float = 900,
     dashboard: Dashboard | None = None,
+    metrics: Metrics | None = None,
+    metrics_port: int = 0,
 ) -> Starlette:
+    active_dashboard = dashboard or Dashboard()
+
     @asynccontextmanager
     async def lifespan(app: Starlette) -> AsyncGenerator[None]:
+        collector = metrics
+        if collector is None and metrics_port:
+            collector = Metrics(active_dashboard.context.registry.path)
         stop = threading.Event()
+        listener = (
+            start_server(collector, metrics_port)
+            if collector and metrics_port
+            else None
+        )
 
         def collect() -> None:
             while not stop.is_set():
                 if gc:
                     try:
-                        gc()
+                        if collector:
+                            collector.collect(gc)
+                        else:
+                            gc()
                     except Exception as exc:  # noqa: BLE001 - keep periodic GC alive
                         # Exception text may contain credentials or command output.
                         logging.getLogger(__name__).error(
@@ -83,6 +99,11 @@ def create_app(
             yield
         finally:
             stop.set()
+            if listener:
+                from starlette.concurrency import run_in_threadpool
+
+                await run_in_threadpool(listener.shutdown)
+                listener.server_close()
             if thread:
                 from starlette.concurrency import run_in_threadpool
 
@@ -92,7 +113,7 @@ def create_app(
         routes=[
             Route("/healthz", ok),
             Route("/auth/verify", ok),
-            *(dashboard or Dashboard()).routes(),
+            *active_dashboard.routes(),
         ],
         middleware=[
             Middleware(AccessMiddleware, verifier=verifier or AccessVerifier())
@@ -104,8 +125,15 @@ def create_app(
 def serve(
     gc: Callable[[], object], interval: float, *, context: Context | None = None
 ) -> None:
+    dashboard = Dashboard(context)
+    port = int(os.environ.get("PHUB_METRICS_PORT", "9100") or 0)
     uvicorn.run(
-        create_app(gc=gc, interval=interval, dashboard=Dashboard(context)),
+        create_app(
+            gc=gc,
+            interval=interval,
+            dashboard=dashboard,
+            metrics_port=port,
+        ),
         host="0.0.0.0",
         port=int(os.environ.get("PHUB_HTTP_PORT", "8080")),
     )
