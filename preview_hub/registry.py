@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import fcntl
 import json
+import os
 import re
 import sqlite3
 from collections.abc import Generator
@@ -79,16 +80,26 @@ class Registry:
         EnvName(name)
         folder = self.state_dir / "locks"
         folder.mkdir(exist_ok=True)
-        with (folder / f"{name}.lock").open("a") as handle:
-            try:
-                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError as exc:
-                raise BusyError(f"Operation in progress: {name}") from exc
-            try:
-                self.recover(name)
-                yield
-            finally:
-                fcntl.flock(handle, fcntl.LOCK_UN)
+        path = folder / f"{name}.lock"
+        for _ in range(2):
+            with path.open("a") as handle:
+                try:
+                    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError as exc:
+                    raise BusyError(f"Operation in progress: {name}") from exc
+                try:
+                    try:
+                        current = os.stat(path).st_ino
+                    except FileNotFoundError:
+                        current = None
+                    if os.fstat(handle.fileno()).st_ino != current:
+                        continue
+                    self.recover(name)
+                    yield
+                    return
+                finally:
+                    fcntl.flock(handle, fcntl.LOCK_UN)
+        raise BusyError(f"Lock replaced: {name}")
 
     def recover(self, name: str) -> None:
         """Interrupt RUNNING operations left by a process that died.

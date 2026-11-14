@@ -4,6 +4,7 @@ import argparse
 import fcntl
 import getpass
 import json
+import logging
 import math
 import os
 import sys
@@ -13,6 +14,7 @@ from pathlib import Path
 from typing import Any, Protocol, cast
 from urllib.parse import urlsplit
 
+from .cleanup import cleanup
 from .contracts import (
     Catalog,
     CompositionSpec,
@@ -345,6 +347,7 @@ def main(argv: list[str] | None = None, context: Context | None = None) -> int:
                     finally:
                         db.close()
                     cast(ImageCollector, ctx.runner).gc_images(retained)
+            logging.getLogger(__name__).info("GC cleanup: %s", cleanup(ctx))
         else:
             DescribeEnvironment(ctx).execute(args.name)
             if args.tail < 0:
