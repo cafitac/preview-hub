@@ -50,7 +50,7 @@
 | PH-9 | 환경 namespace 방어(PSA, SA 토큰, egress) | 배포 | PR (#29 위에 쌓음) |
 | PH-4 / HL-2 | GitHub 토큰 마운트, secrets.sh | 클러스터 | homelab#201(머지=배포, 승인 필요) · homelab#202 |
 | HL-1 | 레지스트리 NetworkPolicy 좁히기 | 클러스터 + 실측 | 대기 |
-| HL-3 | `/metrics` · 경보 | 배포 + 클러스터 + Cloudflare | 대기 |
+| HL-3 | `/metrics` · 경보 | 배포 + 클러스터 | hub 지표 PR (#30 위) + homelab#204(hub 배포와 함께 머지) |
 | HL-4 | hub 쓰기 범위 VAP | 클러스터 | homelab#203(머지=적용, 승인 필요) |
 | PH-11 · HL-5 · HL-6 | 문구 · 레지스트리 GC · buildkit 캐시 상한 | 배포 / 클러스터 | 대기 |
 
@@ -69,3 +69,4 @@
 - 2026-11-14 HL-4: homelab#203 — VAP 를 platform/admission 에 둔다(apps/preview-hub 의 namespace 변환이 VAP 에 namespace 를 붙이기 때문). CEL 서버 검증은 적용 뒤 소유자 확인 필요
 - 2026-11-14 PH-8: gc 가 안 쓰는 체크아웃(7일), 웹 로그(14일), 삭제된 환경의 매니페스트 · 잠금 파일을 지운다. Registry.lock 은 flock 뒤 inode 를 확인한다. 체크아웃 재사용 시 mtime 갱신(진행 중 생성과의 경쟁 방지). 675 passed. 실제 디스크 사용량 실측은 소유자 kubectl 필요
 - 2026-11-14 PH-9: namespace PSA baseline(warn restricted), 모든 파드 automountServiceAccountToken=false, egress 는 DNS · 같은 namespace · 공인 주소만. 676 passed. 배포 뒤 e2e 로 서비스 간 통신 · DNS 확인 필요(k3s kube-router 의 egress 적용)
+- 2026-11-14 HL-3: hub 는 별도 포트(PHUB_METRICS_PORT, 9100)에 Access 없이 /metrics. homelab#204 는 PodMonitor + PreviewHubDown/GcStale/OpStuck. Cloudflare bypass 와 phub-* namespace 경보는 쓰지 않음(이유는 PR 본문). 680 passed
