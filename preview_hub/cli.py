@@ -24,7 +24,7 @@ from .contracts import (
     validate,
 )
 from .git import GitCliSource
-from .github import UrllibGitHubApi
+from .github import UrllibGitHubApi, token_file
 from .lifecycle import (
     CapacityError,
     Context,
@@ -208,9 +208,7 @@ def create_context() -> Context:
             f"Unknown runner {runner_name!r}: valid runners are fake, kubernetes"
         )
 
-    github = UrllibGitHubApi(
-        Path(os.environ.get("PHUB_GITHUB_TOKEN_FILE", "/run/secrets/github_token"))
-    )
+    github = UrllibGitHubApi(token_file())
     return Context(
         Registry(state_dir),
         catalog,

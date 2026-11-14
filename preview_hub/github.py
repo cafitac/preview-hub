@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import os
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -71,10 +72,18 @@ def open_request(request: Request, *, timeout: float) -> Response:
     return build_opener(NoRedirect()).open(request, timeout=timeout)
 
 
+DEFAULT_TOKEN_FILE = "/run/secrets/github_token"
+
+
+def token_file() -> Path:
+    """The GitHub token path every process (hub, web, bot) reads."""
+    return Path(os.environ.get("PHUB_GITHUB_TOKEN_FILE", DEFAULT_TOKEN_FILE))
+
+
 class UrllibGitHubApi:
     def __init__(
         self,
-        token_path: Path = Path("/run/secrets/github_token"),
+        token_path: Path = Path(DEFAULT_TOKEN_FILE),
         *,
         transport: Transport = open_request,
         sleep: Callable[[float], None] = time.sleep,

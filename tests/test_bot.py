@@ -515,8 +515,13 @@ def test_missing_token_logs_once_and_idles(tmp_path, catalog, monkeypatch, caplo
     from preview_hub.bot import polling
 
     class MissingApi:
+        def __init__(self, token_path):
+            paths.append(token_path)
+
         def token_present(self):
             return False
+
+    paths = []
 
     monkeypatch.setattr(polling, "UrllibGitHubApi", MissingApi)
     monkeypatch.setattr(polling, "load_yaml", lambda path: None)
@@ -534,6 +539,37 @@ def test_missing_token_logs_once_and_idles(tmp_path, catalog, monkeypatch, caplo
         polling.serve(sleep=sleep)
     assert sleeps == [1, 1, 1]
     assert caplog.text.count("token missing") == 1
+
+
+def test_serve_reads_token_file_from_env(monkeypatch, tmp_path, catalog):
+    # The hub mounts the token directory at PHUB_GITHUB_TOKEN_FILE; the bot must
+    # read the same path instead of the image default.
+    from preview_hub.bot import polling
+
+    paths = []
+
+    class Api:
+        def __init__(self, token_path):
+            paths.append(token_path)
+
+        def token_present(self):
+            return False
+
+    monkeypatch.setattr(polling, "UrllibGitHubApi", Api)
+    monkeypatch.setattr(polling, "load_yaml", lambda path: None)
+    monkeypatch.setattr(polling.Catalog, "parse", lambda value: catalog)
+    monkeypatch.setenv("PHUB_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("PHUB_BOT_INTERVAL", "1")
+    monkeypatch.setenv(
+        "PHUB_GITHUB_TOKEN_FILE", "/run/phub-secrets/github/github_token"
+    )
+
+    def stop(seconds):
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        polling.serve(sleep=stop)
+    assert paths == [Path("/run/phub-secrets/github/github_token")]
 
 
 def test_name_and_overlap():
@@ -628,7 +664,7 @@ def test_token_appearing_starts_polling_without_restart(
 
     token = tmp_path / "github_token"
     monkeypatch.setattr(
-        polling, "UrllibGitHubApi", lambda: UrllibGitHubApi(token_path=token)
+        polling, "UrllibGitHubApi", lambda _path: UrllibGitHubApi(token_path=token)
     )
     monkeypatch.setattr(polling, "load_yaml", lambda path: None)
     monkeypatch.setattr(polling.Catalog, "parse", lambda value: catalog)
@@ -723,6 +759,9 @@ def test_serve_continues_after_poll_exception(
     from preview_hub.bot import polling
 
     class PresentApi:
+        def __init__(self, token_path):
+            pass
+
         def token_present(self):
             return True
 

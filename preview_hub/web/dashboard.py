@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import secrets
 import sqlite3
 import subprocess
@@ -22,7 +21,7 @@ from starlette.templating import Jinja2Templates
 
 from ..cli import create_context, environment_descriptor
 from ..contracts import CompositionSpec, EnvName, InvalidInput
-from ..github import GitHubError, UrllibGitHubApi
+from ..github import GitHubError, UrllibGitHubApi, token_file
 from ..lifecycle import Context
 
 # Inherit the configured Uvicorn error handler so INFO audit lines reach container logs.
@@ -73,9 +72,7 @@ class Dashboard:
         clock: Callable[[], float] = time.monotonic,
     ):
         self._context = context
-        self.github = github or UrllibGitHubApi(
-            Path(os.environ.get("PHUB_GITHUB_TOKEN_FILE", "/run/secrets/github_token"))
-        )
+        self.github = github or UrllibGitHubApi(token_file())
         self.spawner = spawner
         self.clock = clock
         self.lock = threading.Lock()
