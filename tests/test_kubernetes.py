@@ -62,7 +62,7 @@ class Kubectl:
     def __init__(self, hub_namespace: bool = True):
         self.calls: list[list[str]] = []
         self.applied: list[list[dict]] = []
-        self.responses: dict[tuple[str, ...], str] = {}
+        self.responses: dict[tuple[str, ...], str | list[str]] = {}
         self.failures: dict[tuple[str, ...], str] = {}
         self.hub_namespace = hub_namespace
 
@@ -81,7 +81,11 @@ class Kubectl:
                 return subprocess.CompletedProcess(args, 1, "", error)
         for prefix, output in self.responses.items():
             if rest[: len(prefix)] == prefix:
+                if isinstance(output, list):
+                    output = output.pop(0)
                 return subprocess.CompletedProcess(args, 0, output, "")
+        if rest[:2] == ("get", "job"):
+            return subprocess.CompletedProcess(args, 0, job_status("Complete"), "")
         return subprocess.CompletedProcess(args, 0, "", "")
 
 
@@ -264,10 +268,10 @@ def test_apply_order_and_prune(tmp_path):
         "rollout status",
         "delete job",
         "apply:Job",
-        "wait -n",
+        "get job",
         "delete job",
         "apply:Job",
-        "wait -n",
+        "get job",
         "apply:Deployment,Service,Middleware,Middleware,Ingress",
         "apply:Deployment,Service,Middleware,Ingress",
         "delete -n",
@@ -305,11 +309,94 @@ def test_unchanged_services_are_not_reapplied(tmp_path):
 
 def test_apply_failure_names_the_service(tmp_path):
     kubectl = Kubectl()
-    kubectl.failures[("wait", "-n", "phub-test-one")] = "job failed"
+    kubectl.failures[("get", "job", "-n", "phub-test-one")] = "job failed"
     result = runner(tmp_path, kubectl).apply(make_plan(tmp_path))
     assert not result.success
     assert result.service == "backend"
     assert "job failed" in result.log_excerpt
+
+
+def job_status(condition=None):
+    return json.dumps(
+        {
+            "status": {
+                "conditions": [
+                    {
+                        "type": condition,
+                        "status": "True",
+                        "reason": "BackoffLimitExceeded",
+                        "message": "init command failed",
+                    }
+                ]
+                if condition
+                else []
+            }
+        }
+    )
+
+
+@pytest.mark.parametrize("logs_fail", [False, True])
+def test_apply_failed_job_stops_immediately(tmp_path, logs_fail):
+    kubectl = Kubectl()
+    kubectl.responses[("get", "job")] = job_status("Failed")
+    kubectl.responses[("logs",)] = "migration error tail"
+    if logs_fail:
+        kubectl.failures[("logs",)] = "logs unavailable"
+    sleeps = []
+    result = KubernetesRunner(tmp_path, executor=kubectl, sleep=sleeps.append).apply(
+        make_plan(tmp_path)
+    )
+    assert not result.success
+    assert result.service == "backend"
+    assert "backend--db--init-0" in result.log_excerpt
+    assert "BackoffLimitExceeded" in result.log_excerpt
+    assert "init command failed" in result.log_excerpt
+    if not logs_fail:
+        assert "migration error tail" in result.log_excerpt
+    assert len([c for c in kubectl.calls if c[1:3] == ["get", "job"]]) == 1
+    assert [c for c in kubectl.calls if c[1] == "logs"] == [
+        [
+            "kubectl",
+            "logs",
+            "-n",
+            "phub-test-one",
+            "job/backend--db--init-0",
+            "--tail=50",
+        ]
+    ]
+    assert sleeps == []
+
+
+def test_apply_job_pending_then_complete(tmp_path):
+    kubectl = Kubectl()
+    kubectl.responses[("get", "job")] = [
+        job_status(),
+        job_status("Complete"),
+        job_status("Complete"),
+    ]
+    sleeps = []
+    result = KubernetesRunner(tmp_path, executor=kubectl, sleep=sleeps.append).apply(
+        make_plan(tmp_path)
+    )
+    assert result.success, result.message
+    assert sleeps == [2]
+
+
+def test_apply_pending_job_times_out(tmp_path):
+    kubectl = Kubectl()
+    kubectl.responses[("get", "job")] = job_status()
+    ticks = iter([0, 0, 601])
+    sleeps = []
+    result = KubernetesRunner(
+        tmp_path, executor=kubectl, sleep=sleeps.append, clock=lambda: next(ticks)
+    ).apply(make_plan(tmp_path))
+    assert not result.success
+    assert result.service == "backend"
+    assert (
+        "init job backend--db--init-0 did not complete within 600s"
+        in result.log_excerpt
+    )
+    assert sleeps == []
 
 
 def pod(service, reason=None):
