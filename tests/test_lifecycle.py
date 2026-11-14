@@ -15,6 +15,7 @@ from preview_hub.lifecycle import (
     UpdateEnvironment,
 )
 from preview_hub.registry import BusyError, Registry
+from preview_hub.runner import Health
 
 
 def spec(name="feat-x", **refs):
@@ -373,3 +374,48 @@ def test_update_input_errors_precede_disk_guard(ctx, case):
     with pytest.raises(InvalidInput):
         UpdateEnvironment(ctx).execute("feat-x", changes)
     assert ctx.registry.get("feat-x") == before
+
+
+@pytest.mark.parametrize("live", ["UNHEALTHY", "missing", OSError, ValueError])
+def test_descriptor_live_readiness(ctx, monkeypatch, live):
+    from preview_hub.cli import environment_descriptor
+
+    env = CreateEnvironment(ctx).execute(spec())
+    before = ctx.registry.path.read_bytes()
+
+    def health(name):
+        assert name == env["name"]
+        if isinstance(live, type):
+            raise live("health failed")
+        return {} if live == "missing" else {"backend": Health.UNHEALTHY}
+
+    monkeypatch.setattr(ctx.runner, "health", health)
+    checked = "2030-01-01T00:00:00Z"
+    document = environment_descriptor(ctx, env, now=checked)
+    assert document["readiness"] == {"allHealthy": False, "checkedAt": checked}
+    expected = (
+        "HEALTHY"
+        if isinstance(live, type)
+        else ("UNKNOWN" if live == "missing" else "UNHEALTHY")
+    )
+    assert document["services"][0]["health"] == expected
+    assert env["services"][0]["health"] == "HEALTHY"
+    assert ctx.registry.path.read_bytes() == before
+
+
+def test_descriptor_non_ready_uses_stored_health(ctx, monkeypatch):
+    from preview_hub.cli import environment_descriptor
+
+    env = CreateEnvironment(ctx).execute(spec())
+    env["state"] = "STARTING"
+
+    def health(name):
+        pytest.fail("Non-READY descriptors must not check health")
+
+    monkeypatch.setattr(ctx.runner, "health", health)
+    document = environment_descriptor(ctx, env, now="2030-01-01T00:00:00Z")
+    assert document["readiness"] == {
+        "allHealthy": False,
+        "checkedAt": env["updated_at"],
+    }
+    assert document["services"][0]["health"] == "HEALTHY"
