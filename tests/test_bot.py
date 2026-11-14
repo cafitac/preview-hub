@@ -5,6 +5,8 @@ import json
 import logging
 import sqlite3
 import subprocess
+from concurrent.futures import Executor as Pool
+from concurrent.futures import Future
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -138,11 +140,23 @@ class Runner:
         )
 
 
+class ImmediatePool(Pool):
+    def submit(self, fn, /, *args, **kwargs):
+        future = Future()
+        try:
+            future.set_result(fn(*args, **kwargs))
+        except Exception as exc:  # noqa: BLE001 - capture task failures
+            future.set_exception(exc)
+        return future
+
+
 @pytest.fixture
 def rig(tmp_path, catalog):
     api, runner = Api(), Runner()
     ledger = Ledger(Registry(tmp_path))
-    bot = PollingBot(catalog, api, Executor(runner), ledger, clock=lambda: NOW)
+    bot = PollingBot(
+        catalog, api, Executor(runner), ledger, pool=ImmediatePool(), clock=lambda: NOW
+    )
     return bot, api, runner, ledger
 
 
@@ -230,6 +244,7 @@ def test_exactly_once_and_pinning_across_restart(rig, catalog):
         api,
         Executor(runner),
         Ledger(Registry(ledger.registry.state_dir)),
+        pool=ImmediatePool(),
         clock=lambda: NOW,
     )
     restarted.poll()
@@ -394,6 +409,7 @@ def test_reply_limit_resets_on_restart(rig, catalog):
         api,
         Executor(runner),
         Ledger(Registry(ledger.registry.state_dir)),
+        pool=ImmediatePool(),
         clock=lambda: NOW,
     )
     for _ in range(6):
@@ -542,6 +558,7 @@ def test_crash_after_effect_does_not_repeat(rig, catalog):
         api,
         Executor(runner),
         Ledger(Registry(ledger.registry.state_dir)),
+        pool=ImmediatePool(),
         clock=lambda: NOW + timedelta(minutes=11),
     )
     restarted.poll()
@@ -592,6 +609,7 @@ def test_reply_rebuilds_from_row_and_fresh_status(rig, catalog, status, error):
         api,
         Executor(runner),
         Ledger(Registry(ledger.registry.state_dir)),
+        pool=ImmediatePool(),
         clock=lambda: NOW,
     )
     restarted.replies()
@@ -774,6 +792,7 @@ def test_existing_cursor_accepts_late_overlap_comment_after_restart(rig, catalog
         api,
         Executor(runner),
         Ledger(Registry(ledger.registry.state_dir)),
+        pool=ImmediatePool(),
         clock=lambda: NOW,
     )
     restarted.poll()
@@ -923,6 +942,7 @@ def test_edited_comment_created_before_floor_is_never_executed(rig, catalog, res
             api,
             Executor(runner),
             Ledger(Registry(ledger.registry.state_dir)),
+            pool=ImmediatePool(),
             clock=lambda: NOW + timedelta(minutes=1),
         )
     bot.poll()
@@ -1177,3 +1197,115 @@ def test_executor_hub_exec_prefix():
         [],
         ["kubectl", "exec", "-n", "preview-hub", "deploy/hub", "--"],
     ]
+
+
+def test_background_poll_and_recovery(rig):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    bot, api, runner, ledger = rig
+    entered, release = threading.Event(), threading.Event()
+    original = runner.__call__
+
+    def blocked(args):
+        entered.set()
+        assert release.wait(5)
+        return original(args)
+
+    bot.executor = Executor(blocked)
+    bot.pool = ThreadPoolExecutor(max_workers=4)
+    try:
+        bot.poll()
+        assert entered.wait(5)
+        assert ledger.rows(("RUNNING",))[0]["comment_id"] == 100
+        assert not api.posts
+        assert any(repo == "owner/frontend" for repo, _ in api.polls)
+        bot.clock = lambda: NOW + timedelta(hours=1)
+        bot.recover()
+        assert ledger.rows(("RUNNING",))
+    finally:
+        release.set()
+        bot.pool.shutdown(wait=True)
+    assert ledger.rows(("DONE",))
+    assert not bot.in_flight
+    bot.poll()
+    assert len(api.posts) == 1
+
+
+def test_restart_recovers_recent_running_only(rig):
+    bot, _api, _runner, ledger = rig
+    received = (NOW - timedelta(seconds=1)).isoformat()
+    for identifier in (100, 101):
+        ledger.receive(identifier, REPO, 42, "owner", "/preview down", received)
+    ledger.running(100, "pr-backend-42", "/preview down")
+    bot.recover()
+    assert "interrupted" in ledger.rows(("FAILED",))[0]["error"]
+    assert ledger.rows(("RECEIVED",))[0]["comment_id"] == 101
+
+
+def test_background_exception_is_generic(rig, caplog):
+    from concurrent.futures import ThreadPoolExecutor
+
+    bot, api, _runner, ledger = rig
+
+    def fail(*args):
+        raise RuntimeError("secret credentials")
+
+    bot.executor.execute = fail
+    with caplog.at_level(logging.INFO), ThreadPoolExecutor() as pool:
+        bot.pool = pool
+        bot.handle(REPO, api.comments[0])
+    row = ledger.rows(("FAILED",))[0]
+    assert row["error"] == "Command failed"
+    assert "Command failed" in ledger.initial_replies[100]
+    assert "secret credentials" not in caplog.text
+    assert "secret credentials" not in ledger.initial_replies[100]
+    assert "outcome=FAILED" in caplog.text
+    assert not bot.in_flight
+
+
+def test_environment_commands_are_serial_and_other_environments_parallel(rig):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    bot, api, _runner, ledger = rig
+    first, other, release = threading.Event(), threading.Event(), threading.Event()
+    lock = threading.Lock()
+    active, maximum, order = {}, {}, []
+
+    def execute(command, environment, *args):
+        with lock:
+            active[environment] = active.get(environment, 0) + 1
+            maximum[environment] = max(maximum.get(environment, 0), active[environment])
+            order.append((environment, command.action))
+        if environment == "pr-backend-42" and command.action == "up":
+            first.set()
+            assert release.wait(5)
+        elif environment == "pr-backend-43":
+            other.set()
+        with lock:
+            active[environment] -= 1
+        return Result(0, {})
+
+    bot.executor.execute = execute
+    bot.pool = ThreadPoolExecutor(max_workers=4)
+    try:
+        bot.handle(REPO, api.comments[0])
+        assert first.wait(5)
+        bot.handle(REPO, {**api.comments[0], "id": 101, "body": "/preview down"})
+        bot.handle(
+            REPO,
+            {
+                **api.comments[0],
+                "id": 102,
+                "issue_url": f"https://api.github.com/repos/{REPO}/issues/43",
+            },
+        )
+        assert other.wait(5)
+        assert ("pr-backend-42", "down") not in order
+    finally:
+        release.set()
+        bot.pool.shutdown(wait=True)
+    assert maximum == {"pr-backend-42": 1, "pr-backend-43": 1}
+    assert [action for env, action in order if env == "pr-backend-42"] == ["up", "down"]
+    assert len(ledger.rows(("DONE",))) == 3

@@ -201,6 +201,8 @@ evidence of a live QA run.
 
 ## PR bot
 
+Commands run in background workers (up to 4) so polling keeps serving other repositories; a bot restart marks its running commands interrupted.
+
 Service arguments also accept PR refs, for example `/preview up frontend=pr-7`
 or `/preview update backend=pr-4`. They pass unchanged to the hub CLI.
 

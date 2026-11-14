@@ -4,8 +4,11 @@ import logging
 import math
 import os
 import re
+import threading
 import time
 from collections.abc import Callable
+from concurrent.futures import Executor as Pool
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
@@ -31,8 +34,16 @@ class PollingBot:
         executor: Executor,
         ledger: Ledger,
         *,
+        pool: Pool | None = None,
+        max_workers: int = 4,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ):
+        self.pool = (
+            pool if pool is not None else ThreadPoolExecutor(max_workers=max_workers)
+        )
+        self.in_flight: dict[int, Future[None]] = {}
+        self.flight_lock = threading.RLock()
+        self.environment_locks: dict[str, threading.Lock] = {}
         self.catalog = catalog
         self.api = api
         self.executor = executor
@@ -155,19 +166,25 @@ class PollingBot:
             status = "FAILED"
         else:
             self.ledger.running(comment_id, environment, command.normalized())
-            result = self.executor.execute(
-                command, environment, service, pr["head"]["sha"]
-            )
-            status = "DONE" if result.code == 0 else "FAILED"
-            self.ledger.finish(
-                comment_id,
-                status,
-                format_reply(environment, result),
-                self.clock().isoformat(),
-                None
-                if result.code == 0
-                else str(result.data.get("message", "Command failed")),
-            )
+            with self.flight_lock:
+                env_lock = self.environment_locks.setdefault(
+                    environment, threading.Lock()
+                )
+                future = self.pool.submit(
+                    self._execute,
+                    comment_id,
+                    command,
+                    environment,
+                    service,
+                    pr["head"]["sha"],
+                    repo,
+                    number,
+                    env_lock,
+                )
+                # An injected synchronous pool may already have completed the task.
+                if not future.done():
+                    self.in_flight[comment_id] = future
+            return
         LOG.info(
             "repo=%s pr=%s comment=%s command=%s outcome=%s",
             repo,
@@ -177,18 +194,64 @@ class PollingBot:
             status,
         )
 
+    def _execute(
+        self,
+        comment_id: int,
+        command: Command,
+        environment: str,
+        service: str,
+        sha: str,
+        repo: str,
+        number: int,
+        env_lock: threading.Lock,
+    ) -> None:
+        try:
+            with env_lock:
+                try:
+                    result = self.executor.execute(command, environment, service, sha)
+                except Exception:  # noqa: BLE001 - exception text may contain credentials
+                    result = Result(5, {"stage": "exec", "message": "Command failed"})
+                status = "DONE" if result.code == 0 else "FAILED"
+                self.ledger.finish(
+                    comment_id,
+                    status,
+                    format_reply(environment, result),
+                    self.clock().isoformat(),
+                    None
+                    if result.code == 0
+                    else str(result.data.get("message", "Command failed")),
+                )
+                LOG.info(
+                    "repo=%s pr=%s comment=%s command=%s outcome=%s",
+                    repo,
+                    number,
+                    comment_id,
+                    command.action,
+                    status,
+                )
+        finally:
+            with self.flight_lock:
+                self.in_flight.pop(comment_id, None)
+
     def recover(self) -> None:
         now = self.clock()
-        for row in self.ledger.rows(("RUNNING", "RECEIVED")):
-            if datetime.fromisoformat(row["received_at"]) < now - timedelta(minutes=10):
-                error = "interrupted, run the command again"
-                reply = format_reply(
-                    row["environment"] or "unknown",
-                    Result(5, {"stage": "exec", "message": error}),
-                )
-                self.ledger.finish(
-                    row["comment_id"], "FAILED", reply, now.isoformat(), error
-                )
+        with self.flight_lock:
+            for row in self.ledger.rows(("RUNNING", "RECEIVED")):
+                if row["status"] == "RUNNING" and row["comment_id"] in self.in_flight:
+                    continue
+                received = datetime.fromisoformat(row["received_at"])
+                restarted = row[
+                    "status"
+                ] == "RUNNING" and received < datetime.fromisoformat(self.started_at)
+                if restarted or received < now - timedelta(minutes=10):
+                    error = "interrupted, run the command again"
+                    reply = format_reply(
+                        row["environment"] or "unknown",
+                        Result(5, {"stage": "exec", "message": error}),
+                    )
+                    self.ledger.finish(
+                        row["comment_id"], "FAILED", reply, now.isoformat(), error
+                    )
 
     def replies(self) -> None:
         for row in self.ledger.rows(("DONE", "FAILED", "REJECTED"), unreplied=True):
@@ -375,15 +438,18 @@ def serve(*, sleep: Callable[[float], None] = time.sleep) -> None:
 
     with (registry.state_dir / "bot.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        while True:
-            try:
-                if not api.token_present():
-                    if not missing_logged:
-                        LOG.warning("token missing")
-                        missing_logged = True
-                else:
-                    bot.poll()
-            except Exception:  # noqa: BLE001 - keep polling without leaking exception data
-                # Do not log exception messages or tracebacks containing API data.
-                LOG.warning("Bot poll failed")
-            sleep(interval)
+        try:
+            while True:
+                try:
+                    if not api.token_present():
+                        if not missing_logged:
+                            LOG.warning("token missing")
+                            missing_logged = True
+                    else:
+                        bot.poll()
+                except Exception:  # noqa: BLE001 - keep polling without leaking exception data
+                    # Do not log exception messages or tracebacks containing API data.
+                    LOG.warning("Bot poll failed")
+                sleep(interval)
+        finally:
+            bot.pool.shutdown(wait=True, cancel_futures=False)
