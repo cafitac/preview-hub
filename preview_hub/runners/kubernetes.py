@@ -11,6 +11,7 @@ import hashlib
 import json
 import math
 import subprocess
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
@@ -47,6 +48,8 @@ FATAL_WAITING = {
 }
 RESOURCE_MEMORY = "512Mi"
 PROBE_PERIOD = 2
+INIT_JOB_TIMEOUT_SECONDS = 600
+INIT_JOB_POLL_SECONDS = 2
 
 
 def namespace(env: str) -> str:
@@ -487,9 +490,12 @@ class KubernetesRunner:
         auth_url: str = "http://hub.preview-hub.svc.cluster.local:8080/auth/verify",
         hub_namespace: str = "preview-hub",
         executor: Executor = execute,
+        sleep: Callable[[float], None] = time.sleep,
+        clock: Callable[[], float] = time.monotonic,
     ):
         self.state_dir, self.builder, self.auth_url = state_dir, builder, auth_url
         self.executor = executor
+        self.sleep, self.clock = sleep, clock
         # Refuse to act on the wrong cluster.
         try:
             self._kubectl("get", "namespace", hub_namespace, "-o", "name")
@@ -513,6 +519,36 @@ class KubernetesRunner:
     def _json(self, *args: str) -> dict[str, Any]:
         output = self._kubectl(*args, "-o", "json")
         return cast(dict[str, Any], json.loads(output)) if output.strip() else {}
+
+    def _wait_job(self, ns: str, name: str) -> None:
+        deadline = self.clock() + INIT_JOB_TIMEOUT_SECONDS
+        while self.clock() < deadline:
+            job = self._json("get", "job", "-n", ns, name)
+            for condition in job.get("status", {}).get("conditions", []):
+                if condition.get("status") != "True":
+                    continue
+                if condition.get("type") == "Complete":
+                    return
+                if condition.get("type") == "Failed":
+                    logs = ""
+                    try:
+                        logs = self._kubectl(
+                            "logs", "-n", ns, f"job/{name}", "--tail=50"
+                        )
+                    except OSError:
+                        pass
+                    # RunResult keeps the last 2000 chars; leave room for the header.
+                    raise OSError(
+                        f"init job {name} failed: {condition.get('reason', '')}: "
+                        f"{condition.get('message', '')}\n{logs[-1500:]}"
+                    )
+            remaining = deadline - self.clock()
+            if remaining <= 0:
+                break
+            self.sleep(min(INIT_JOB_POLL_SECONDS, remaining))
+        raise OSError(
+            f"init job {name} did not complete within {INIT_JOB_TIMEOUT_SECONDS}s"
+        )
 
     def _apply(self, objects: list[dict[str, Any]]) -> None:
         if objects:
@@ -588,15 +624,7 @@ class KubernetesRunner:
                         "--wait=true",
                     )
                     self._apply([job])
-                    self._kubectl(
-                        "wait",
-                        "-n",
-                        ns,
-                        "--for=condition=complete",
-                        f"job/{name}",
-                        "--timeout=600s",
-                        timeout=660,
-                    )
+                    self._wait_job(ns, name)
                 self._apply(
                     [
                         o
