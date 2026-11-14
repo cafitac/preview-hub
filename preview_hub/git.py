@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import fcntl
+import os
 import re
 import subprocess
 from dataclasses import dataclass
@@ -151,6 +152,8 @@ class GitCliSource:
             if target.exists():
                 try:
                     if self._git("-C", str(target), "rev-parse", "HEAD") == commit_sha:
+                        # Reuse refreshes the age `phub gc` uses to expire unused checkouts.
+                        os.utime(target)
                         return target
                 except InvalidInput:
                     pass

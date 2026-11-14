@@ -1,3 +1,4 @@
+import os
 import subprocess
 from pathlib import Path
 
@@ -50,6 +51,16 @@ def test_exact_checkout_and_refs(repo, tmp_path):
         source.resolve(str(repo), "--upload-pack=bad")
     with pytest.raises(InvalidInput):
         source.checkout(str(repo), "../invalid")
+
+
+def test_checkout_reuse_refreshes_age(repo, tmp_path):
+    sha = git(repo, "rev-parse", "HEAD")
+    source = GitCliSource(tmp_path / "cache", {str(repo): "backend"})
+    checkout = source.checkout(str(repo), sha)
+    os.utime(checkout, (0, 0))
+    assert source.checkout(str(repo), sha) == checkout
+    # gc expires unused checkouts by age; a reused one must look recent.
+    assert checkout.stat().st_mtime > 0
 
 
 @pytest.mark.parametrize(

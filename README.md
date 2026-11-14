@@ -162,6 +162,11 @@ files. Tests use synthetic local Git repositories and never contact a remote.
 
 ## Serving and GC
 
+GC deletes expired environments and unused cached images, unused source checkouts older
+than 7 days, web operation logs older than 14 days, and rendered manifests for deleted
+environments. Environment lock files are removed 14 days after deletion (or after their
+mtime when no environment exists); checkout lock files are retained.
+
 `phub serve --interval 900` runs GC immediately and every 15 minutes, including
 stale-operation recovery; `PHUB_GC_INTERVAL` changes the default interval.
 Every operation holds its environment's lock file (flock) from start to finish, so a
