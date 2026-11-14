@@ -41,7 +41,7 @@
 | --- | --- | --- | --- |
 | PH-2 | init Job 실패를 600초 기다리지 않고 바로 끝낸다 | 배포 | #22 CI 통과, 머지 대기 |
 | PH-1 | descriptor 의 readiness 를 live 로 계산 | 배포 | PR (#22 위에 쌓음) |
-| PH-3 | inventory API + `scripts/phub-remote` | 배포 | 대기 |
+| PH-3 | inventory API + `scripts/phub-remote` | 배포 | PR (#23 위에 쌓음) |
 | PH-10 | hub 재시작 뒤 중단 작업 즉시 회수 | 배포 | 대기 |
 | PH-6 | 생성 단계별 시간 기록 | 배포 | 대기 |
 | PH-7 | 한 환경 안 서비스 빌드 병렬화 | 배포 | 대기 |
@@ -59,3 +59,4 @@
 - 2026-11-14 PH-2: `kubectl wait` 를 `get job` 2초 폴링으로 바꿈. Failed 조건이면 바로 실패 + Job 로그 50줄. 검증 625 passed(ruff · pyright 통과)
 - 2026-11-14 PH-2: PR #22 게시, CI 통과(5ad9bf0). 머지는 소유자. 배포는 다음 hub 이미지 태그와 함께(소유자 승인)
 - 2026-11-14 PH-1: READY 환경의 descriptor 는 runner.health 로 다시 계산(실패하면 allHealthy=false), checkedAt=조회 시각, 대시보드 5초 캐시, health 에 resource StatefulSet 포함. 634 passed
+- 2026-11-14 PH-3: `GET /api/environments/{name}/inventory`, `scripts/phub-remote`(cloudflared access curl). 650 passed. 실제 Access 경유 호출은 배포 뒤 소유자 세션으로 확인 필요

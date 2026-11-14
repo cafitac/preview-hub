@@ -10,7 +10,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Protocol, cast
 
@@ -231,6 +231,17 @@ class Dashboard:
                 return JSONResponse(cached[1])
         return JSONResponse(self.summary(rows[0]))
 
+    def inventory(self, request: Request) -> Response:
+        try:
+            name = EnvName(request.path_params["name"])
+        except InvalidInput as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        try:
+            inv = self.context.runner.inventory(name)
+        except OSError:
+            return JSONResponse({"error": "Inventory unavailable"}, status_code=502)
+        return JSONResponse({"name": name, **asdict(inv), "empty": inv.empty})
+
     def page(self, request: Request) -> Response:
         return self.templates.TemplateResponse(
             request,
@@ -365,6 +376,7 @@ class Dashboard:
             Route("/api/environments", self.environments),
             Route("/api/environments", self.mutate, methods=["POST"]),
             Route("/api/environments/{name}", self.detail),
+            Route("/api/environments/{name}/inventory", self.inventory),
             Route("/api/environments/{name}", self.mutate, methods=["DELETE"]),
             Route("/api/environments/{name}/update", self.mutate, methods=["POST"]),
         ]

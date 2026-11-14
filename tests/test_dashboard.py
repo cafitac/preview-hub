@@ -91,6 +91,7 @@ def web(ctx):
         ("GET", "/api/environments"),
         ("GET", "/api/environments/feat-a"),
         ("GET", "/api/environments/feat-a?format=descriptor"),
+        ("GET", "/api/environments/feat-a/inventory"),
         ("POST", "/api/environments"),
         ("POST", "/api/environments/feat-a/update"),
         ("DELETE", "/api/environments/feat-a"),
@@ -624,3 +625,54 @@ def test_descriptor_cache_expires(web, monkeypatch):
     clock[0] = 5.1
     assert client.get(url, headers=AUTH).status_code == 200
     assert len(health_calls) == len(manifest_calls) == 2
+
+
+@pytest.mark.parametrize("populated", [False, True])
+def test_inventory_without_registry_row(web, monkeypatch, populated):
+    from preview_hub.runner import Inventory
+
+    client, dashboard, _, _ = web
+    inv = (
+        Inventory(("pod",), ("namespace",), ("claim",), ("image",))
+        if populated
+        else Inventory()
+    )
+    names = []
+
+    def inventory(name):
+        names.append(name)
+        return inv
+
+    monkeypatch.setattr(dashboard.context.runner, "inventory", inventory)
+    response = client.get("/api/environments/missing/inventory", headers=AUTH)
+    assert response.status_code == 200
+    assert response.json() == {
+        "name": "missing",
+        "containers": list(inv.containers),
+        "networks": list(inv.networks),
+        "volumes": list(inv.volumes),
+        "images": list(inv.images),
+        "empty": not populated,
+    }
+    assert names == ["missing"]
+    assert (
+        client.post("/api/environments/missing/inventory", headers=AUTH).status_code
+        == 405
+    )
+
+
+def test_inventory_invalid_and_unavailable(web, monkeypatch):
+    client, dashboard, _, _ = web
+
+    def fail(name):
+        raise OSError("private stderr")
+
+    monkeypatch.setattr(dashboard.context.runner, "inventory", fail)
+    assert (
+        client.get("/api/environments/INVALID/inventory", headers=AUTH).status_code
+        == 400
+    )
+    response = client.get("/api/environments/missing/inventory", headers=AUTH)
+    assert response.status_code == 502
+    assert response.json() == {"error": "Inventory unavailable"}
+    assert "private stderr" not in response.text

@@ -80,6 +80,27 @@ The defaults above match the intended container mounts. `runner` accepts `fake` 
 error listing the valid runners. The free-space guard on the state volume requires
 5 GiB; tests inject a free-space provider through `lifecycle.Context`.
 
+### Remote use (from a laptop)
+
+```sh
+cloudflared access login https://preview-hub.cafitac.com
+scripts/phub-remote up feat-x --set backend=feature --ttl 2h
+scripts/phub-remote update feat-x --set backend=main
+scripts/phub-remote status feat-x --descriptor
+scripts/phub-remote list
+scripts/phub-remote wait-ready feat-x
+scripts/phub-remote down feat-x
+scripts/phub-remote inventory feat-x --expect-empty
+```
+
+`PHUB_URL` overrides the hub URL; `PHUB_CLOUDFLARED` overrides the binary.
+`wait-ready` exits 5 on FAILED/DELETED and 6 on timeout; `--expect-empty` exits 1
+when runtime objects remain.
+
+### Inside the hub pod (`kubectl exec`)
+
+Run the following commands through `kubectl exec` in the hub pod:
+
 ```sh
 phub up feat-x --set backend=feature --ttl 24h
 phub up -f composition.yaml
@@ -335,6 +356,10 @@ The JSON API uses the same Access authentication:
 - `GET /api/environments`: active registry entries, without lifecycle reconciliation.
 - `GET /api/environments/{name}`: one entry; `?format=descriptor` uses the same
   descriptor implementation as `phub status --format descriptor`.
+- `GET /api/environments/{name}/inventory`: runtime `containers`, `networks`,
+  `volumes`, `images` and `empty`, including names without a registry entry. With the
+  Kubernetes runner these hold pods, namespaces and PVCs (`namespace/name`); use it to
+  confirm teardown after `DELETE`.
 - `POST /api/environments`: `{ "services": { "backend": "pr-4" }, "ttl": "2h" }`,
   with optional `name`.
 - `POST /api/environments/{name}/update`: `{ "services": { "backend": "main" } }`.
