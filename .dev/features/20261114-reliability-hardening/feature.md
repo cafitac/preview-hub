@@ -77,3 +77,5 @@
 - 2026-11-14 배포: homelab #202·#203·#205·#206 머지, hub d25f45824e27(#207). #201 은 bot 이 PHUB_GITHUB_TOKEN_FILE 을 읽지 않아(polling.py:425) `token missing` → #208 로 되돌림. HL-1 실측: registry remoteaddr 는 hub · buildkitd · 10.42.0.1(노드) 셋뿐(homelab #206). HL-6 실측: buildkit 1.2G
 - 2026-11-14 INIT-RETRY: e2e 두 번 모두 backend--db--init-1 이 DB 에 Connection refused. 새 파드가 뜬 직후 약 1초 동안 NetworkPolicy 가 연결을 거부한다(racetest: 첫 시도 FAIL, 이후 open). PH-9 이전 이미지에서도 AQP-1 P8 이 같은 Job 에서 실패했다. init Job backoffLimit 0 → 2. 681 passed
 - 2026-11-14 INIT-WAIT: hub 46ab027771c9 배포 뒤 e2e 에서 init-0 이 재시도 2번까지 세 파드 모두 Connection refused. Job 재시도는 새 파드라 매번 같은 1초 구간에 걸린다. init Job 앞에 initContainer wait-db(postgres:<버전>, pg_isready -h <db 서비스> 를 1초마다 최대 120초)를 두고 backoffLimit 은 0 으로 되돌림
+- 2026-11-14 배포 완료: hub 051f66c9d010(homelab #210), e2e-051f READY 28초(init-0·init-1 Complete), 삭제 뒤 inventory 비어 있음. #204 반영(PodMonitor, PrometheusRule, /metrics 확인)
+- 2026-11-14 BOT-TOKEN: bot 이 PHUB_GITHUB_TOKEN_FILE 을 읽도록 github.token_file() 하나로 모음(hub · web · bot 공통). 이 이미지 배포 뒤 homelab #201 을 다시 적용한다. 682 passed

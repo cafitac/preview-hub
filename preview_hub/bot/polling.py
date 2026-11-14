@@ -15,7 +15,7 @@ from typing import Any, cast
 
 from preview_hub.cli import config_override, load_config
 from preview_hub.contracts import Catalog, InvalidInput, load_yaml
-from preview_hub.github import GitHubApi, GitHubError, UrllibGitHubApi
+from preview_hub.github import GitHubApi, GitHubError, UrllibGitHubApi, token_file
 from preview_hub.registry import Registry
 
 from .commands import Command, authorize, environment_name, parse_command, repository
@@ -422,7 +422,7 @@ def serve(*, sleep: Callable[[float], None] = time.sleep) -> None:
     registry = Registry(
         Path(config_override(config, "PHUB_STATE_DIR", "state_dir", "/state"))
     )
-    api = UrllibGitHubApi()
+    api = UrllibGitHubApi(token_file())
     hub_exec = os.environ.get("PHUB_HUB_EXEC")
     bot = PollingBot(
         catalog,
