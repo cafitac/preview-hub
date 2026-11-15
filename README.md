@@ -47,6 +47,7 @@ on the same state volume and ServiceAccount, so the bot runs `phub` itself
 | `PHUB_BOT_INTERVAL` | seconds between bot polls | `20` |
 | `PHUB_HEALTH_POLL_INTERVAL` | seconds between health polls | `2` |
 | `PHUB_ACCESS_TEAM_DOMAIN` / `PHUB_ACCESS_AUD` | Cloudflare Access verification | unset (fails closed) |
+| `PHUB_ACCESS_SERVICE_TOKENS` | comma-separated Access service-token Client IDs allowed on `/auth/verify` | unset (no service access) |
 
 The hub image is built by `deploy/k8s-image.sh` (tag `phub/hub:<commit>`); its
 `Dockerfile` bundles `kubectl` and `buildctl`.
@@ -358,6 +359,41 @@ public URL. Local URLs remain in descriptors as `localUrl`. Every public
 route verifies an Access JWT at the hub; absent verifier configuration fails
 closed. `/healthz` is the only unauthenticated HTTP endpoint. This unit supplies
 the authenticated HTTP foundation; dashboard routes are added separately.
+
+### Service identities (unattended runs)
+
+An Access service token (`CF-Access-Client-Id` / `CF-Access-Client-Secret`, used by
+`aiqa --access service-token`) reaches the hub as a JWT whose `common_name` claim is
+the token's Client ID and which has no `email`. The hub accepts it only when that
+Client ID is listed in `PHUB_ACCESS_SERVICE_TOKENS` (comma-separated, whitespace
+ignored; Client IDs are not secrets, the Client Secret never reaches the hub).
+
+- A service identity passes only `GET /auth/verify`, the Traefik ForwardAuth call on
+  every environment route. Every other route (dashboard, JSON API, mutations, any
+  other method or path) returns 403 `service_forbidden_route`. `/healthz` stays open.
+- A JWT carrying `email` is always a human, whatever else it carries.
+- Unset or empty `PHUB_ACCESS_SERVICE_TOKENS` rejects every token JWT with 401, as
+  before. A Client ID that is not listed, or a missing or non-string `common_name`,
+  is 401 `unauthorized`; the server logs only the reason code, never token values.
+
+Owner steps (the key lives in the same Secret as the Access settings, read at
+container start):
+
+1. Cloudflare: create the service token, then add a Service Auth policy including it
+   to the Access application that covers `preview-hub.cafitac.com` and
+   `phub-*.cafitac.com`. Keep the Client Secret on the machine that runs `aiqa`.
+2. Add the Client ID to the Secret and restart the hub (run against the cluster):
+
+   ```sh
+   kubectl -n preview-hub patch secret hub-access --type merge \
+     -p '{"stringData":{"PHUB_ACCESS_SERVICE_TOKENS":"<client-id>"}}'
+   kubectl -n preview-hub rollout restart deploy/hub
+   kubectl -n preview-hub rollout status deploy/hub
+   ```
+
+   Re-creating `hub-access` from scratch drops this key; patch it back afterwards.
+3. Revoke by setting the key to an empty string and restarting the hub, or by
+   revoking the token in Cloudflare.
 
 ## Dashboard
 
