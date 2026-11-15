@@ -39,20 +39,20 @@
 
 | 단위 | 내용 | 결정 | 상태 |
 | --- | --- | --- | --- |
-| PH-2 | init Job 실패를 600초 기다리지 않고 바로 끝낸다 | 배포 | #22 CI 통과, 머지 대기 |
-| PH-1 | descriptor 의 readiness 를 live 로 계산 | 배포 | PR (#22 위에 쌓음) |
-| PH-3 | inventory API + `scripts/phub-remote` | 배포 | PR (#23 위에 쌓음) |
-| PH-10 | hub 재시작 뒤 중단 작업 즉시 회수 | 배포 | PR (#24 위에 쌓음) |
-| PH-6 | 생성 단계별 시간 기록 | 배포 | PR (#25 위에 쌓음) |
-| PH-7 | 한 환경 안 서비스 빌드 병렬화 | 배포 | PR (#26 위에 쌓음) |
-| PH-5 | 봇 명령을 polling 에서 떼어 냄 | 배포 | PR (#27 위에 쌓음) |
-| PH-8 | 남는 파일 정리(gc) | 배포 | PR (#28 위에 쌓음) |
-| PH-9 | 환경 namespace 방어(PSA, SA 토큰, egress) | 배포 | PR (#29 위에 쌓음) |
-| PH-4 / HL-2 | GitHub 토큰 마운트, secrets.sh | 클러스터 | homelab#201(머지=배포, 승인 필요) · homelab#202 |
-| HL-1 | 레지스트리 NetworkPolicy 좁히기 | 클러스터 + 실측 | 실측 대기(소유자 kubectl) |
-| HL-3 | `/metrics` · 경보 | 배포 + 클러스터 | hub 지표 PR (#30 위) + homelab#204(hub 배포와 함께 머지) |
-| HL-4 | hub 쓰기 범위 VAP | 클러스터 | homelab#203(머지=적용, 승인 필요) |
-| PH-11 · HL-5 · HL-6 | 문구 · 레지스트리 GC · buildkit 캐시 상한 | 배포 / 클러스터 | PH-11 PR (#31 위) · HL-5 #36 + homelab#213 · #215(배포 완료) · homelab#205 |
+| PH-2 | init Job 실패를 600초 기다리지 않고 바로 끝낸다 | 배포 | 완료(머지 · 배포, hub dcf4a6ff31a7) |
+| PH-1 | descriptor 의 readiness 를 live 로 계산 | 배포 | 완료(머지 · 배포, hub dcf4a6ff31a7) |
+| PH-3 | inventory API + `scripts/phub-remote` | 배포 | 완료(머지 · 배포, hub dcf4a6ff31a7) |
+| PH-10 | hub 재시작 뒤 중단 작업 즉시 회수 | 배포 | 완료(머지 · 배포, hub dcf4a6ff31a7) |
+| PH-6 | 생성 단계별 시간 기록 | 배포 | 완료(머지 · 배포, hub dcf4a6ff31a7) |
+| PH-7 | 한 환경 안 서비스 빌드 병렬화 | 배포 | 완료(머지 · 배포, hub dcf4a6ff31a7) |
+| PH-5 | 봇 명령을 polling 에서 떼어 냄 | 배포 | 완료(머지 · 배포, hub dcf4a6ff31a7) |
+| PH-8 | 남는 파일 정리(gc) | 배포 | 완료(머지 · 배포, hub dcf4a6ff31a7) |
+| PH-9 | 환경 namespace 방어(PSA, SA 토큰, egress) | 배포 | 완료(머지 · 배포, hub dcf4a6ff31a7) |
+| PH-4 / HL-2 | GitHub 토큰 마운트, secrets.sh | 클러스터 | 완료(preview-hub · homelab 머지, Argo 반영, hub dcf4a6ff31a7) |
+| HL-1 | 레지스트리 NetworkPolicy 좁히기 | 클러스터 + 실측 | 완료(preview-hub · homelab 머지, Argo 반영, hub dcf4a6ff31a7) |
+| HL-3 | `/metrics` · 경보 | 배포 + 클러스터 | 완료(preview-hub · homelab 머지, Argo 반영, hub dcf4a6ff31a7) |
+| HL-4 | hub 쓰기 범위 VAP | 클러스터 | 완료(preview-hub · homelab 머지, Argo 반영, hub dcf4a6ff31a7) |
+| PH-11 · HL-5 · HL-6 | 문구 · 레지스트리 GC · buildkit 캐시 상한 | 배포 / 클러스터 | 완료(preview-hub · homelab 머지, Argo 반영, hub dcf4a6ff31a7) |
 
 ## 진행 기록
 - 2026-11-14: AQP-1 sprint 세션(「agent-skills 작업」)이 P8 실환경 검증에 hub API 로 환경을 만든다. hub 배포나 클러스터 변경 전에는 그 세션에 먼저 알린다(코드 PR 은 조율 불필요)
@@ -83,3 +83,4 @@
 - 2026-11-14 배포(#35): hub 2a0752af3d82 + #201 재적용(homelab #211, 재시작 1회). bot 이 /run/phub-secrets/github/github_token 을 읽음(token_present=True). e2e-2a07 READY 30초, 삭제 뒤 inventory 비어 있음. 롤백 없음
 - 2026-11-14 결정(소유자, AQP-1 세션 경유): HL-5 는 hub 가 빌드 슬롯을 잡고 GC. 레지스트리 push htpasswd 는 후속(테넌트나 노드가 생기면 다시 연다). 단일 노드 전제(10.42.0.1/32)는 homelab PLAN.md 위험 표에 고칠 위치와 함께 적음(homelab #212)
 - 2026-11-14 HL-5 배포(소유자 승인): homelab #213 머지(VAP·Role·CronJob suspend 동기화, hub SA 의 registry-gc-* Job 만 허용됨을 server dry-run 으로 확인) → #215 newTag dcf4a6ff31a7. 첫 GC Job registry-gc-1794632321 완료 후 삭제, state/registry-gc.last 기록, phub_gc_failures_total 0. e2e(e2e-hl5) READY → down → inventory 비어 있음. 롤백 없음. CronJob 컨트롤러가 직접 만든 Job 이 아니라며 UnexpectedJob 경고를 남기지만 동작에는 영향 없다
+- 2026-11-15 PH-4 후속: README 의 토큰 경로 문구를 배포된 구성(디렉터리 마운트 /run/phub-secrets/github + PHUB_GITHUB_TOKEN_FILE)에 맞춤. 상태 표를 최종 상태로 갱신. 남은 소유자 결정: 레지스트리 push htpasswd(후속), 다중 노드 시 registry-pull 게이트웨이 주소 추가

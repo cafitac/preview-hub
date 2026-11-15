@@ -117,8 +117,9 @@ phub gc
 
 PR refs use `pr-<n>` (1–7 digits, no leading zero) and pin the current head of an open, same-repository PR.
 Updates re-resolve the head. Branches literally named `pr-<n>` must be addressed by SHA.
-The hub needs `/run/secrets/github_token` for PR refs (override with
-`PHUB_GITHUB_TOKEN_FILE` for tests); the deployment mounts that single file read-only.
+The hub and bot read the GitHub token from `PHUB_GITHUB_TOKEN_FILE` (default
+`/run/secrets/github_token`). The homelab deployment sets it to
+`/run/phub-secrets/github/github_token`, a read-only Secret directory mount.
 
 Exit codes: 0 success, 2 invalid input, 3 busy, 4 capacity/disk guard,
 5 lifecycle failure. All commands accept `--format text|json|descriptor`;
@@ -231,10 +232,11 @@ with **Pull requests: read and write**, **Issues: read and write**,
 **Contents: read**, and **Metadata: read** (implicit). PR conversation replies use
 the issues endpoint but require Pull requests write permission.
 Do not use a broad `gh` login token. The token reaches the hub pod as the Kubernetes
-Secret `hub-github`, mounted as the single file `/run/secrets/github_token`; never put
-the value in a command argument. The bot checks that file each loop; if absent or
-empty it logs `token missing` once and idles. Rotating the Secret takes effect after
-the kubelet refreshes the mounted file, without restarting the container.
+Secret `hub-github`, mounted as the directory `/run/phub-secrets/github` and read
+through `PHUB_GITHUB_TOKEN_FILE`; never put the value in a command argument. The bot
+checks that file each loop; if absent or empty it logs `token missing` once and idles. Rotating the Secret takes effect after
+the kubelet refreshes the mounted file, without restarting the container (this relies
+on the directory mount; a `subPath` mount is never refreshed).
 
 Post one command as the entire PR comment:
 
