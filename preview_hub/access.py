@@ -10,17 +10,31 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from http.client import HTTPException
-from typing import Any, cast
+from typing import Any, Literal, cast
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 import jwt
 
 from .contracts import is_hostname
 
+# Cloudflare Access service-token JWTs carry the token's Client ID here, no email.
+SERVICE_IDENTITY_CLAIM = "common_name"
+
 
 @dataclass(frozen=True)
 class Identity:
-    email: str
+    email: str | None = None
+    kind: Literal["human", "service"] = "human"
+    service_id: str | None = None
+
+    def __post_init__(self) -> None:
+        # Dashboard code reads email as a string, so each kind must be self-consistent.
+        if self.kind == "human":
+            valid = bool(self.email and self.email.strip()) and not self.service_id
+        else:
+            valid = bool(self.service_id) and self.email is None
+        if not valid:
+            raise ValueError(f"invalid {self.kind} identity")
 
 
 class AccessDenied(ValueError):
@@ -55,6 +69,7 @@ class AccessVerifier:
         *,
         fetcher: Callable[[str], object] = fetch_jwks,
         clock: Callable[[], float] = time.monotonic,
+        service_tokens: str | None = None,
     ):
         self.team_domain = (
             os.environ.get("PHUB_ACCESS_TEAM_DOMAIN", "")
@@ -63,6 +78,16 @@ class AccessVerifier:
         )
         self.audience = (
             os.environ.get("PHUB_ACCESS_AUD", "") if audience is None else audience
+        )
+        # Client IDs (not secrets) of service tokens allowed on /auth/verify.
+        self.service_tokens = frozenset(
+            value.strip()
+            for value in (
+                os.environ.get("PHUB_ACCESS_SERVICE_TOKENS", "")
+                if service_tokens is None
+                else service_tokens
+            ).split(",")
+            if value.strip()
         )
         self.fetcher, self.clock = fetcher, clock
         self._keys: dict[str, jwt.PyJWK] = {}
@@ -133,10 +158,18 @@ class AccessVerifier:
                 leeway=60,
                 options={"require": ["exp", "iat", "aud", "iss"]},
             )
-            email = claims.get("email")
-            if not isinstance(email, str) or not email.strip():
+            if "email" in claims:
+                # An email-bearing JWT is always human; common_name adds nothing.
+                email = claims["email"]
+                if not isinstance(email, str) or not email.strip():
+                    raise AccessDenied("malformed")
+                return Identity(email=email)
+            service_id = claims.get(SERVICE_IDENTITY_CLAIM)
+            if service_id is None:
                 raise AccessDenied("malformed")
-            return Identity(email)
+            if not isinstance(service_id, str) or service_id not in self.service_tokens:
+                raise AccessDenied("service_not_allowed")
+            return Identity(kind="service", service_id=service_id)
         except jwt.InvalidAudienceError:
             raise AccessDenied("bad_audience") from None
         except jwt.InvalidIssuerError:

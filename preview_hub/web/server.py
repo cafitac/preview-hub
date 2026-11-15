@@ -42,6 +42,12 @@ class AccessMiddleware(BaseHTTPMiddleware):
             )
         except AccessDenied:
             return PlainTextResponse("unauthorized", status_code=401)
+        # Service identities (Access service tokens) only pass ForwardAuth.
+        if request.state.identity.kind == "service" and (
+            request.method != "GET" or request.url.path != "/auth/verify"
+        ):
+            logging.getLogger(__name__).info("service_forbidden_route")
+            return PlainTextResponse("service_forbidden_route", status_code=403)
         return await call_next(request)
 
 
